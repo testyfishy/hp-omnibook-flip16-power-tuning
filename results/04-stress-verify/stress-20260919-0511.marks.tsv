@@ -1,0 +1,6 @@
+1789816285.504109	stress	idle
+1789816305.789160	stress	single
+1789816336.117252	stress	allcore_zstd
+1789816472.346396	stress	allcore_openssl
+1789816523.675720	stress	combined_cpu_gpu
+1789816572.064735	stress	recovery

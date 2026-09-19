@@ -1,0 +1,65 @@
+=== PER-CONDITION SUMMARY  (6 rounds, interleaved; median [p25..p75], mean)
+metric                                                     saver                      balanced                      saver+bp
+idle SoC W                            0.489 [  0.483..  0.517]   0.498    0.523 [  0.487..  0.588]   0.522    0.502 [  0.483..  0.534]   0.508
+burst J/burst                         0.473 [  0.470..  0.480]   0.472    0.482 [  0.470..  0.510]   0.487    0.477 [  0.470..  0.530]   0.498
+burst latency ms (median)            130.60 [ 116.35.. 136.30]  127.46   116.35 [ 116.15.. 117.30]  116.48   115.53 [ 114.70.. 116.05]  115.61
+burst latency ms (p95)               141.10 [ 119.10.. 141.70]  133.72   118.95 [ 118.70.. 119.90]  119.13   118.20 [ 117.40.. 119.00]  118.48
+pdf_render J                          27.50 [  27.30..  27.90]   27.67    28.50 [  28.20..  29.10]   28.65    28.50 [  28.50..  28.70]   28.50
+pdf_render s                          14.96 [   9.90..  14.99]   13.29     9.85 [   9.80..   9.90]    9.85     9.80 [   9.80..   9.81]    9.82
+office J                               5.95 [   5.80..   6.10]    5.95     6.15 [   6.00..   6.80]    6.68     6.25 [   6.10..   6.40]    6.28
+office s                               2.43 [   1.59..   2.46]    2.16     1.64 [   1.63..   1.66]    1.64     1.69 [   1.61..   1.73]    1.68
+python J                               6.70 [   6.70..   7.80]    7.12     7.80 [   7.80..   7.80]    7.83     7.75 [   7.70..   7.80]    7.75
+python s                               2.64 [   1.49..   2.65]    2.26     1.48 [   1.45..   1.50]    1.47     1.49 [   1.46..   1.49]    1.48
+compress J                            36.80 [  36.60..  37.00]   36.75    37.10 [  36.70..  37.20]   36.92    36.80 [  36.30..  37.10]   36.73
+compress s                             6.17 [   6.13..   6.18]    6.17     6.21 [   6.11..   6.22]    6.17     6.13 [   6.07..   6.21]    6.13
+sustained MB/s (higher=better)        40.19 [  40.04..  40.61]   40.25    40.68 [  40.64..  40.81]   40.72    40.44 [  40.43..  40.74]   40.53
+sustained SoC J/GB                   150.53 [ 150.32.. 150.63]  150.49   150.43 [ 150.22.. 150.53]  150.37   151.14 [ 150.22.. 151.35]  150.90
+sustained SoC W                        5.90 [   5.89..   5.97]    5.92     5.98 [   5.97..   5.99]    5.98     5.97 [   5.97..   5.98]    5.97
+trial SoC Wh                          0.071 [  0.071..  0.071]   0.071    0.072 [  0.072..  0.072]   0.072    0.072 [  0.072..  0.072]   0.072
+trial battery Wh (36 J steps)         0.170 [  0.170..  0.180]   0.173    0.170 [  0.170..  0.170]   0.170    0.170 [  0.170..  0.170]   0.170
+trial s                               93.67 [  89.37..  96.89]   93.29    89.40 [  89.32..  89.48]   89.41    89.43 [  89.33..  89.56]   89.46
+trial temp max C                      45.00 [  44.00..  47.00]   45.50    48.00 [  47.00..  48.00]   47.33    48.00 [  48.00..  49.00]   48.50
+trial mean MHz                       918.88 [ 899.04.. 946.63]  920.77   976.79 [ 910.38.. 981.85]  961.47   947.82 [ 930.23.. 966.17]  949.85
+
+=== PAIRED DIFFERENCES vs saver  (same round, cond - saver; negative = less/lower than saver; 'wins' = rounds where cond is better)
+metric                                                      balanced                          saver+bp
+                                    median diff  [95% boot CI]  wins  median diff  [95% boot CI]  wins
+idle SoC W                           +0.045 [  -0.057..  +0.082]  2/6    +0.002 [  -0.035..  +0.063]  3/6 
+burst J/burst                        +0.005 [  -0.007..  +0.048]  1/6    +0.010 [  -0.007..  +0.073]  2/6 
+burst latency ms (median)            -13.65 [  -20.85..   +1.55]  4/6    -15.72 [  -20.47..   +0.65]  5/6 
+burst latency ms (p95)               -22.10 [  -23.00..   +1.35]  4/6    -22.80 [  -23.75..   +0.85]  5/6 
+pdf_render J                          +0.90 [   +0.05..   +2.00]  1/6*    +0.90 [   +0.05..   +1.55]  1/6*
+pdf_render s                          -5.07 [   -5.26..   +0.00]  5/6     -5.12 [   -5.27..   -0.05]  5/6*
+office J                              +0.25 [   -0.25..   +2.20]  2/6    +0.300 [  +0.050..  +0.650]  0/6*
+office s                             -0.784 [  -0.850..  +0.078]  4/6    -0.714 [  -0.813..  +0.081]  4/6 
+python J                              +1.10 [   -0.25..   +1.30]  2/6     +0.95 [   -0.15..   +1.10]  1/6 
+python s                              -1.15 [   -1.19..   +0.00]  4/6     -1.16 [   -1.16..   -0.02]  6/6*
+compress J                            +0.15 [   -0.25..   +0.60]  1/6    +0.050 [  -0.500..  +0.400]  2/6 
+compress s                           +0.034 [  -0.169..  +0.124]  2/6    -0.040 [  -0.147..  +0.054]  4/6 
+sustained MB/s (higher=better)       +0.489 [  +0.172..  +0.740]  6/6*   +0.219 [  -0.027..  +0.657]  5/6 
+sustained SoC J/GB                    -0.00 [   -0.67..   +0.31]  3/6     +0.72 [   -0.56..   +1.08]  2/6 
+sustained SoC W                      +0.083 [  +0.007..  +0.102]  0/6*   +0.072 [  +0.001..  +0.101]  1/6*
+trial SoC Wh                         +0.002 [  -0.000..  +0.002]  1/6    +0.001 [  +0.000..  +0.002]  0/6*
+trial battery Wh (36 J steps)        -0.005 [  -0.010..  +0.005]  3/6    +0.000 [  -0.010..  +0.000]  2/6 
+trial s                               -4.22 [   -7.45..   +0.03]  5/6     -4.06 [   -7.46..   +0.02]  5/6 
+trial temp max C                      +2.00 [   -0.50..   +4.00]  1/6     +3.00 [   +1.00..   +5.00]  0/6*
+trial mean MHz                       +46.15 [  -35.30.. +111.25]  2/6    +17.56 [   -7.53..  +77.18]  2/6 
+
+* = 95 % bootstrap CI of the median paired difference excludes zero (a real, consistent difference at this sample size)
+
+=== VERDICT (differences that are consistent across rounds)
+balanced vs saver:
+   pdf_render J                          +0.90  ( +3.3 %)  better in 1/6 rounds
+   sustained MB/s (higher=better)        +0.49  ( +1.2 %)  better in 6/6 rounds
+   sustained SoC W                       +0.08  ( +1.4 %)  better in 0/6 rounds
+saver+bp vs saver:
+   pdf_render J                          +0.90  ( +3.3 %)  better in 1/6 rounds
+   pdf_render s                          -5.12  (-34.2 %)  better in 5/6 rounds
+   office J                              +0.30  ( +5.0 %)  better in 0/6 rounds
+   python s                              -1.16  (-43.8 %)  better in 6/6 rounds
+   sustained SoC W                       +0.07  ( +1.2 %)  better in 1/6 rounds
+   trial SoC Wh                          +0.00  ( +1.5 %)  better in 0/6 rounds
+   trial temp max C                      +3.00  ( +6.7 %)  better in 0/6 rounds
+
+Read: energy metrics (J, Wh, W) decide battery life; time/latency metrics decide how it feels. A profile is 'worth it' only if it
+wins on time/latency WITHOUT a consistent energy loss, or wins on energy without a consistent latency loss.

@@ -1,0 +1,47 @@
+=== step28 2026-09-18T01:43:38-06:00 adapter=0 profile=power-saver brightness=238/400 charge=40% ===
+MSRs: 773=5 1b2=2000003  firefox pids=13 ferdium pids=11  ISH driver=unbound
+--- rebinding ISH for the bound baseline:
+     bound=no runtime=suspended
+--- HANDS OFF for ~5 min
+     scenario                 SoC_W Cor_W GFX_W pc2%% pc6%% pc10%%  C7%% Busy%%  IRQ/s Bat_W TRM/s CAL/s i2c/s xe/s
+     (rebind failed: rows 1-2 skipped; ISH already unbound)
+     3 ISH unbound             1.68  0.39  0.01   0.0   0.0   0.0  16.0  13.6  10849  6.82    14  4876     0  369
+     4  +HFI notify off        1.69  0.40  0.00   0.0   0.0   0.0  14.0  13.4  10747  6.82     6  4773     0  370
+     5  +HFI+HWP notify off    1.74  0.43  0.01   0.0   0.0   0.0  14.3  13.8  11092  6.82    11  5074     0  371
+     6  +tailscaled stopped    1.73  0.43  0.00   0.0   0.0   0.0  13.9  13.5  11029  6.82     4  5067     0  368
+     eDP-1 -> 48.001 Hz
+     7  +48 Hz panel           1.38  0.25  0.00   0.3   0.2   0.2  25.0   9.3   6909  6.83   157  2860     0  151
+     eDP-1 -> 120.000 Hz
+     8  +Ferdium frozen        1.63  0.36  0.00   0.0   0.0   0.0  17.1  12.3   9916  6.82     2  4376     0  374
+     9  +Firefox frozen        1.02  0.09  0.00  52.9   2.2   3.4  44.7   3.7   2182  6.82   260   959     0    4
+     10 ALL combined           0.55  0.05  0.00   7.6   1.6  59.3  44.6   1.4    951  6.83    69   404     0    2
+     11 ALL repeat             0.51  0.03  0.00   9.1   1.6  60.3  45.4   1.1    708  6.84    59   299     0    2
+     12 ISH unbound again      1.72  0.44  0.00   0.0   0.0   0.0  14.8  14.3  11633  6.82    40  5287     0  371
+--- SUMMARY
+     scenario                 SoC_W Cor_W GFX_W pc2%% pc6%% pc10%%  C7%% Busy%%  IRQ/s Bat_W TRM/s CAL/s i2c/s xe/s
+     3 ISH unbound             1.68  0.39  0.01   0.0   0.0   0.0  16.0  13.6  10849  6.82    14  4876     0  369
+     4  +HFI notify off        1.69  0.40  0.00   0.0   0.0   0.0  14.0  13.4  10747  6.82     6  4773     0  370
+     5  +HFI+HWP notify off    1.74  0.43  0.01   0.0   0.0   0.0  14.3  13.8  11092  6.82    11  5074     0  371
+     6  +tailscaled stopped    1.73  0.43  0.00   0.0   0.0   0.0  13.9  13.5  11029  6.82     4  5067     0  368
+     7  +48 Hz panel           1.38  0.25  0.00   0.3   0.2   0.2  25.0   9.3   6909  6.83   157  2860     0  151
+     8  +Ferdium frozen        1.63  0.36  0.00   0.0   0.0   0.0  17.1  12.3   9916  6.82     2  4376     0  374
+     9  +Firefox frozen        1.02  0.09  0.00  52.9   2.2   3.4  44.7   3.7   2182  6.82   260   959     0    4
+     10 ALL combined           0.55  0.05  0.00   7.6   1.6  59.3  44.6   1.4    951  6.83    69   404     0    2
+     11 ALL repeat             0.51  0.03  0.00   9.1   1.6  60.3  45.4   1.1    708  6.84    59   299     0    2
+     12 ISH unbound again      1.72  0.44  0.00   0.0   0.0   0.0  14.8  14.3  11633  6.82    40  5287     0  371
+--- PCH ISH power gate now: PMC0:PCH IP: 18 - ISH                             	State: On
+--- PSR full status
+     Sink support: PSR = yes [0x03], Panel Replay = no, Panel Replay Selective Update = no, Panel Replay DSC support = not supported
+     PSR mode: disabled
+     PSR sink not reliable: no
+     Sink support: PSR = yes [0x03], Panel Replay = no, Panel Replay Selective Update = no, Panel Replay DSC support = not supported
+     PSR mode: disabled
+     PSR sink not reliable: no
+     Sink support: PSR = yes [0x03], Panel Replay = no, Panel Replay Selective Update = no, Panel Replay DSC support = not supported
+     PSR mode: disabled
+     PSR sink not reliable: no
+--- per-cpu TRM 5 s with HFI off:
+/home/user/claude-maintenance/step28-power-clean.sh: line 47: /dev/shm/t1: Permission denied
+cpu0=50436 cpu1=50436 cpu2=50436 cpu3=50436 cpu4=0 cpu5=0 cpu6=0 cpu7=0 
+=== done ===
+restored: HFI/HWP notify on, tailscaled started, 120 Hz, apps resumed, inhibitors released (ISH left unbound)
