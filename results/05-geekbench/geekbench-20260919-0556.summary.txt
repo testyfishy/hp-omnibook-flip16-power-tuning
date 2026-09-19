@@ -1,0 +1,17 @@
+=== GEEKBENCH 6.7.1 CPU — HP OmniBook X Flip 16 (Core Ultra 9 288V), Ubuntu 26.04, kernel 7.0.0-31-generic
+config      adapter  profile      EPP                 cap W    single   multi  run s    SoC W mean/med/max  Wh/run  idle W  Tmax   fan
+battery6    battery  power-saver  balance_power       6/6        1893    4455    344    2.96/ 3.25/  7.88   0.283    0.65    51     0
+ac          AC       balanced     balance_performance 30/37      3004   11451    262    8.96/ 2.27/ 36.95   0.652    2.05    95  2550
+performance AC       performance  performance         30/37      2974   11431    262    9.77/ 4.49/ 37.06   0.711    2.57    94  2350
+
+relative to the first row:
+  battery6     single  1.00x  multi  1.00x  energy/run  1.00x  multi-score per SoC watt    1504
+  ac           single  1.59x  multi  2.57x  energy/run  2.30x  multi-score per SoC watt    1277
+  performance  single  1.57x  multi  2.57x  energy/run  2.51x  multi-score per SoC watt    1170
+
+result URLs (public):
+  battery6     https://browser.geekbench.com/v6/cpu/19213634
+  ac           https://browser.geekbench.com/v6/cpu/19213676
+  performance  https://browser.geekbench.com/v6/cpu/19213724
+
+markdown table: /home/user/claude-maintenance/logs/geekbench-20260919-0556.md

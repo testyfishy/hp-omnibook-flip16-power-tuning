@@ -1,0 +1,3 @@
+battery6	adapter=battery profile=power-saver epp=balance_power msr=6/6 mmio=12/21 gpu_max=1500 temp=41C fan=0 bat=35%
+ac	adapter=AC profile=balanced epp=balance_performance msr=30/37 mmio=30/37 gpu_max=2050 temp=40C fan=0 bat=34%
+performance	adapter=AC profile=performance epp=performance msr=30/37 mmio=33/37 gpu_max=2050 temp=46C fan=2350 bat=38%

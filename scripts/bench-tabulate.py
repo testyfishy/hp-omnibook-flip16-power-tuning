@@ -19,6 +19,12 @@ for f in sorted(glob.glob(pfx + ".*.cpu.txt"), key=key):   # run order (battery6
         m = re.search(label + r"\s+Score\s+(\d+)", txt); return int(m.group(1)) if m else None
     sc, mc = score("Single-Core"), score("Multi-Core")
     url = next(iter(re.findall(r"https://browser\.geekbench\.com/v6/cpu/\d+", txt)), "")
+    # the free CLI prints no scores locally (they are on the result page, behind a bot check): a sidecar
+    # <prefix>.<mode>.scores.txt with "single=NNNN multi=NNNN" (copied from the page) fills them in
+    side = f"{pfx}.{mode}.scores.txt"
+    if os.path.exists(side):
+        st_ = open(side).read(); m1 = re.search(r"single\s*=\s*(\d+)", st_); m2 = re.search(r"multi\s*=\s*(\d+)", st_)
+        sc = int(m1.group(1)) if m1 else sc; mc = int(m2.group(1)) if m2 else mc
     ph = [r for r in rows if r["tier"] == mode and r["phase"] == "geekbench_cpu"]
     idle = [float(r["soc_w"]) for r in rows if r["tier"] == mode and r["phase"] == "idle"]
     w = [float(r["soc_w"]) for r in ph]; temp = [float(r["pkg_temp_c"]) for r in ph]; fan = [float(r["fan_rpm"]) for r in ph]

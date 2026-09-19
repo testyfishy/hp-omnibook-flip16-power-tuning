@@ -32,6 +32,9 @@ Why 6 W and why balance_power:
   **13–16 % lower latency** for **+1.7 % SoC energy per task-set** and no change at idle (~0.50 W).
 * **PL1 = PL2 by design** ("no turbo"): the firmware's PL1 window is 28 s, PL2's is ~1 ms; equal limits make
   the cap effectively instantaneous, and the 6/8 tier showed no benefit from a separate burst budget.
+* **Geekbench 6 at the 6 W policy: 1893 single / 4455 multi**, vs 3004 / 11451 plugged in, for 57 % less
+  energy per run and the best score per watt of the three configurations (section 5). Performance mode scored
+  the same as Balanced.
 * Under an all-core load with the cap binding, the iGPU is held at its 400 MHz floor (driver throttle reason =
   PL1/PL2). CPU+GPU-heavy use (games) will crawl at 6 W; that is the point of the profile, not a bug.
 
@@ -263,10 +266,38 @@ caps 6/6 unchanged at the end. All checks passed.
 
 ### 5. Geekbench 6 across the three configurations
 
-Pending — `scripts/step60-geekbench.sh` runs Geekbench 6.7.1 CPU on battery at 6/6 W, then plugged in
-(balanced 30/37 W), then in performance mode, with the same telemetry, and `bench-tabulate.py` produces a
-table of single/multi-core score, SoC watts, Wh per run, idle watts, temperature, fan, and multi-core score
-per SoC watt. Results will be added to `results/05-geekbench/` together with the public Geekbench Browser URLs.
+`results/05-geekbench/`. Geekbench 6.7.1 CPU, run by `scripts/step60-geekbench.sh` with the same 2 Hz
+telemetry: first on battery under the final policy, then plugged in with the stock Balanced profile, then in
+Performance mode (switched by the script and restored afterwards). The battery configuration was run twice.
+Result pages are public on the Geekbench Browser.
+
+![geekbench](results/figures/fig5-geekbench.png)
+
+| configuration | cap PL1/PL2 | EPP | single-core | multi-core | run s | SoC W mean / max | Wh per run | pkg Tmax | fan | result |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **battery, tuned Power Saver** | 6/6 W | balance_power | **1893** | **4455** | 344 | 2.96 / 7.9 | **0.283** | 51 °C | 0 rpm | [19213634](https://browser.geekbench.com/v6/cpu/19213634) |
+| battery, tuned Power Saver (repeat) | 6/6 W | balance_power | 1835 | 4434 | 346 | 3.09 / – | 0.297 | – | 0 rpm | [19213540](https://browser.geekbench.com/v6/cpu/19213540) |
+| plugged in, stock Balanced | 30/37 W | balance_performance | 3004 | 11451 | 262 | 8.96 / 37.0 | 0.652 | 95 °C | 2550 rpm | [19213676](https://browser.geekbench.com/v6/cpu/19213676) |
+| plugged in, Performance | 30/37 W | performance | 2974 | 11431 | 262 | 9.77 / 37.1 | 0.711 | 94 °C | 2350 rpm | [19213724](https://browser.geekbench.com/v6/cpu/19213724) |
+
+Relative to the battery configuration:
+
+| | single-core | multi-core | energy per run | multi-core score per mean SoC watt |
+|---|---|---|---|---|
+| battery, 6 W | 1.00× | 1.00× | 1.00× | **1504** |
+| plugged in, Balanced | 1.59× | 2.57× | 2.30× | 1277 |
+| plugged in, Performance | 1.57× | 2.57× | 2.51× | 1170 |
+
+Reading:
+
+* **Repeatability** of the capped run is within 3 % (1835/4434 vs 1893/4455).
+* **Performance mode buys nothing over Balanced** on this machine: same caps (30/37 W), scores identical
+  within noise, 9 % more energy and a spinning fan. It is a fan-curve/EPP change, not a power-limit change.
+* **The 6 W cap costs 37 % single-core and 61 % multi-core** on Geekbench, for **57 % less energy per run**
+  and the best score-per-watt of the three. Geekbench's single-core workloads (vectorised, memory-heavy) do
+  draw more than 6 W on one core, unlike the light single-thread daily tasks in section 2, which were
+  cap-insensitive down to 4 W; so the cap *does* show on this benchmark where it did not on the daily tasks.
+* Plugged in, the package reaches 95 °C during Geekbench; on battery it stays at 51 °C with the fan off.
 
 ## Reproducing
 
@@ -301,6 +332,9 @@ until the next adapter event, boot or resume.
 * Battery `power_now` on this EC is not usable for sub-minute measurements; whole-laptop numbers come from
   `energy_now` over ≥2-minute tiers and carry a 36 J quantisation.
 * Wine-based Cinebench was not run (no Linux build; results would be neither comparable nor submittable).
+* Geekbench's free Linux build prints no scores locally and its result pages sit behind a bot check; the
+  scores in section 5 were read from headless-browser screenshots of the public result pages
+  (`results/05-geekbench/*.page.png`) and recorded in `*.scores.txt` sidecar files.
 
 ## References
 

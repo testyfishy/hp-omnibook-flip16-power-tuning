@@ -1,0 +1,3 @@
+tier	task	seconds	t0	t1	soc_joules	work
+battery6	idle	15.007	1789818273.658	1789818288.666	9.7	1
+battery6	geekbench_cpu	345.846	1789818288.691	1789818634.537	1067.8	1

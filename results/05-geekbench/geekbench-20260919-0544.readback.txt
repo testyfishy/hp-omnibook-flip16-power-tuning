@@ -1,0 +1,1 @@
+battery6	adapter=battery profile=power-saver epp=balance_power msr=6/6 mmio=12/6 gpu_max=1500 temp=34C fan=0 bat=32%

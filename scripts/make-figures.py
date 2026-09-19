@@ -105,3 +105,22 @@ for i, (_, v) in enumerate(steps): ax.text(v + 0.03, len(steps) - 1 - i, f"{v:.2
 ax.set_yticks(range(len(steps))[::-1]); ax.set_yticklabels([l for l, _ in steps]); ax.set_xlabel("SoC power at idle (W), screen on, battery"); ax.set_xlim(0, 2.0)
 ax.set_title("Idle: what the SoC costs before any cap matters")
 save(fig, "fig0-idle-walkdown")
+
+# ---------- Fig 5: Geekbench across the three power configurations
+GBMD = os.path.join(RES, "05-geekbench", "geekbench-20260919-0556.md")
+if os.path.exists(GBMD):
+    rows = [l.split("|")[1:-1] for l in open(GBMD) if l.startswith("| ") and not l.startswith("| config")]
+    rows = [[c.strip() for c in r] for r in rows]
+    names = {"battery6": "battery, 6 W cap\n(tuned Power Saver)", "ac": "plugged in\n(stock Balanced, 30/37 W)", "performance": "plugged in\n(Performance, 30/37 W)"}
+    labs = [names.get(r[0], r[0]) for r in rows]; single = [int(r[5]) for r in rows]; multi = [int(r[6]) for r in rows]
+    wmean = [float(r[8]) for r in rows]; wh = [float(r[10]) for r in rows]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.5, 3.9), gridspec_kw={"width_ratios": [1.25, 1]})
+    x = list(range(len(rows))); w = 0.38
+    b1 = a1.bar([i - w / 2 for i in x], single, w, color=BLUE, label="single-core score"); b2 = a1.bar([i + w / 2 for i in x], multi, w, color=ORANGE, label="multi-core score")
+    for b in list(b1) + list(b2): a1.text(b.get_x() + b.get_width() / 2, b.get_height() + 120, f"{int(b.get_height())}", ha="center", fontsize=8)
+    a1.set_xticks(x); a1.set_xticklabels(labs, fontsize=8.5); a1.set_ylabel("Geekbench 6.7.1 score"); a1.set_ylim(0, 13500); a1.set_title("Score"); a1.legend(frameon=False, fontsize=8.5, loc="upper left")
+    ppw = [m / p for m, p in zip(multi, wmean)]
+    b3 = a2.bar(x, ppw, 0.5, color=[GREEN, GREY, GREY])
+    for b, e in zip(b3, wh): a2.text(b.get_x() + b.get_width() / 2, b.get_height() + 25, f"{b.get_height():.0f}\n({e:.2f} Wh/run)", ha="center", fontsize=8)
+    a2.set_xticks(x); a2.set_xticklabels(labs, fontsize=8.5); a2.set_ylabel("multi-core score per mean SoC watt"); a2.set_ylim(0, 1900); a2.set_title("Efficiency (higher = better)")
+    save(fig, "fig5-geekbench")

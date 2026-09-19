@@ -1,0 +1,1 @@
+single=1835 multi=4434 url=https://browser.geekbench.com/v6/cpu/19213540 read_from=page_screenshot
