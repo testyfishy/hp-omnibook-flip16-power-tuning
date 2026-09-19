@@ -299,6 +299,18 @@ Reading:
   cap-insensitive down to 4 W; so the cap *does* show on this benchmark where it did not on the daily tasks.
 * Plugged in, the package reaches 95 °C during Geekbench; on battery it stays at 51 °C with the fan off.
 
+### 6. Next: a more robust inflection-point test (planned, scripts included)
+
+Section 2 located the optimum with one sustained workload, one pass, coarse tiers and the ladder's EPP. Before
+calling 6 W final, `scripts/step61-inflection.sh` + `inflection-analyze.py` re-measure it with: 11 caps in
+0.5 W steps around the candidate (4–12 W, PL1 = PL2), three passes in ascending / descending / shuffled order
+(median and spread per cap), the installed EPP (`balance_power`), six fixed-work jobs (all-core integer,
+all-core vector, all-core real-world, single-thread real-world, single-thread interpreter, single-thread
+vector), and both energy views: SoC-only (the screen is on anyway) and whole-laptop (SoC J + measured
+rest-of-system watts × time, for batch-then-sleep use). From the section 2 data the whole-laptop view already
+shifts the optimum to 8–10 W (243 J/GB at 6 W vs 227 at 10 W), so the use-case decides. Results will be added
+here.
+
 ## Reproducing
 
 All scripts are self-contained bash + Python 3 (standard library + Pillow for the charts). They need root for
