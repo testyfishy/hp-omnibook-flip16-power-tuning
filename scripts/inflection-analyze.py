@@ -49,14 +49,20 @@ def verdict(table, label):
         m = {c: table[n][c] for c in table[n]}; cmin = min(m, key=m.get); vmin = m[cmin]
         flat = [c for c in sorted(m) if m[c] <= vmin * (1 + TOL / 100)]
         picks.append(flat[0]); print(f"  {n:10} min at {cmin:4.1f} W ({vmin:.1f} J); flat region {flat[0]:.1f}–{flat[-1]:.1f} W -> lowest acceptable {flat[0]:.1f} W")
-    agg = {c: st.fmean(table[n][c] / min(table[n].values()) for n in names if c in table[n]) for c in caps}
+    # a workload whose J/job varies by less than TOL across ALL caps carries no information about the cap: report it, but
+    # decide on the cap-SENSITIVE workloads only (otherwise flat single-thread jobs dilute the curve towards "any cap is fine")
+    sens = [n for n in names if max(table[n].values()) / min(table[n].values()) - 1 > TOL / 100]
+    insens = [n for n in names if n not in sens]
+    if insens: print(f"  cap-insensitive (J/job within {TOL:.0f} % from {min(caps):g} to {max(caps):g} W): {', '.join(insens)} -> excluded from the aggregate")
+    agg = {c: st.fmean(table[n][c] / min(table[n].values()) for n in sens if c in table[n]) for c in caps} if sens else {}
+    if not agg: print("  no cap-sensitive workload"); return None
     cbest = min(agg, key=agg.get); flat = [c for c in sorted(agg) if agg[c] <= agg[cbest] * (1 + TOL / 100)]
-    print(f"  ALL (mean normalised J/job): best {cbest:.1f} W, flat region {flat[0]:.1f}–{flat[-1]:.1f} W -> recommended cap {flat[0]:.1f} W")
+    print(f"  AGGREGATE over {', '.join(sens)} (mean normalised J/job): best {cbest:.1f} W, flat region {flat[0]:.1f}–{flat[-1]:.1f} W -> lowest acceptable cap {flat[0]:.1f} W")
     print("  normalised: " + "  ".join(f"{c:g}W={agg[c]:.3f}" for c in caps))
     return flat[0]
 soc_pick = verdict({n: {c: med([j for _, j in D[n][c]]) for c in D[n]} for n in names}, "SoC-ONLY (screen on anyway while the job runs)")
 wl_pick = verdict(WL, "WHOLE-LAPTOP (the job is the reason the laptop is on)")
-print(f"\nSUMMARY: SoC-only optimum {soc_pick:.1f} W; whole-laptop optimum {wl_pick:.1f} W. Pick by use-case: background/while-working -> SoC-only; batch-then-sleep -> whole-laptop.")
+print(f"\nSUMMARY: lowest cap within {TOL:.0f} % of the optimum — SoC-only view {soc_pick} W; whole-laptop view {wl_pick} W. Pick by use-case: screen on anyway while the job runs -> SoC-only; the job is why the laptop is on -> whole-laptop.")
 # ---- figure (optional)
 try:
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt

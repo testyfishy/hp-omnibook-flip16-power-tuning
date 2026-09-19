@@ -23,7 +23,9 @@ Why 6 W and why balance_power:
 
 * **Sustained efficiency peaks at 6 W.** Joules per GB of all-core zstd: 174 (4 W) → 163 (5 W) → **149 (6 W)** →
   153 (8 W) → 158 (10 W) → 173 (12 W) → 181 (firmware 12/21). Below 6 W the fixed SoC overhead dominates;
-  above it the V/f curve does.
+  above it the V/f curve does. A second, more thorough test (11 caps, 3 passes, 6 workloads, section 6) puts
+  the SoC-only optimum on a plateau from 5.5 to 6.5 W and confirms 6 W; it also shows that if the screen is
+  charged to the job (batch then sleep) the optimum is 8–10 W.
 * **The cap barely touches daily use.** PDF rendering, an office conversion and a Python job took the *same*
   time at 4 W as at the stock limits; only all-core compression slows (6.2 s at 6 W vs 3.8 s at 12 W).
 * **The energy-performance preference (EPP) matters more than the cap.** Stock Power Saver sets EPP `power`,
@@ -299,17 +301,58 @@ Reading:
   cap-insensitive down to 4 W; so the cap *does* show on this benchmark where it did not on the daily tasks.
 * Plugged in, the package reaches 95 °C during Geekbench; on battery it stays at 51 °C with the fan off.
 
-### 6. Next: a more robust inflection-point test (planned, scripts included)
+### 6. Robust inflection-point re-test — 6 W confirmed for the intended use
 
-Section 2 located the optimum with one sustained workload, one pass, coarse tiers and the ladder's EPP. Before
-calling 6 W final, `scripts/step61-inflection.sh` + `inflection-analyze.py` re-measure it with: 11 caps in
-0.5 W steps around the candidate (4–12 W, PL1 = PL2), three passes in ascending / descending / shuffled order
-(median and spread per cap), the installed EPP (`balance_power`), six fixed-work jobs (all-core integer,
-all-core vector, all-core real-world, single-thread real-world, single-thread interpreter, single-thread
-vector), and both energy views: SoC-only (the screen is on anyway) and whole-laptop (SoC J + measured
-rest-of-system watts × time, for batch-then-sleep use). From the section 2 data the whole-laptop view already
-shifts the optimum to 8–10 W (243 J/GB at 6 W vs 227 at 10 W), so the use-case decides. Results will be added
-here.
+`results/06-inflection/`. 11 caps (4, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9, 10, 12 W, PL1 = PL2), three passes in
+ascending, descending and shuffled order, EPP `balance_power` (the installed policy), thermal gate and 10 s idle
+before every cap, six fixed-work jobs. 41 minutes on battery, fan never spun, every cap started at 39 °C.
+Rest-of-system power measured over the whole run: **4.00 W** (battery 4.67 Wh − SoC 1.93 Wh). Spread between
+passes was 1–3 % of the median for almost every cell, so the curves below are real, not noise.
+
+![inflection re-test](results/06-inflection/inflection-20260919-0634.png)
+
+SoC energy per job (J, median of 3 passes) and time per job (s):
+
+| cap (W) | zstd all-core J / s | sha3 ×8 J / s | PDF ×8 parallel J / s | PDF single J / s | python J / s | sha3 single J / s |
+|---|---|---|---|---|---|---|
+| 4 | 85.2 / 21.3 | 21.1 / 5.1 | 27.3 / 6.8 | 27.9 / 9.9 | 13.7 / 3.4 | 19.2 / 4.9 |
+| 5 | 78.3 / 15.7 | 19.4 / 3.8 | **26.1** / 5.2 | 28.2 / 9.8 | 14.9 / 3.0 | 19.6 / 4.7 |
+| 5.5 | 75.6 / 13.8 | 18.8 / 3.3 | 26.4 / 4.8 | 28.1 / 9.8 | 15.0 / 2.9 | 19.8 / 4.8 |
+| **6** | 73.3 / 12.3 | 18.8 / 3.1 | 27.5 / 4.6 | 28.4 / 9.8 | 15.0 / 2.9 | 19.6 / 4.7 |
+| 6.5 | **72.6** / 11.2 | 18.8 / 2.9 | 27.9 / 4.3 | 28.5 / 9.8 | 15.0 / 3.0 | 19.5 / 4.8 |
+| 7 | 73.5 / 10.6 | 18.8 / 2.6 | 28.0 / 4.0 | 28.4 / 9.9 | 15.1 / 2.9 | 19.6 / 4.8 |
+| 7.5 | 74.7 / 10.0 | 18.8 / 2.5 | 28.6 / 3.9 | 28.2 / 9.9 | 15.4 / 2.9 | 19.6 / 4.8 |
+| 8 | 74.8 / 9.4 | **18.4** / 2.3 | 29.0 / 3.6 | 28.7 / 9.9 | 15.1 / 2.9 | 19.3 / 4.7 |
+| 9 | 73.9 / 8.3 | 19.1 / 2.1 | 30.4 / 3.5 | 28.0 / 9.8 | 15.0 / 2.9 | 19.6 / 4.8 |
+| 10 | 75.7 / 7.7 | 19.5 / 2.0 | 31.9 / 3.4 | 28.2 / 9.9 | 15.0 / 2.9 | 19.6 / 4.7 |
+| 12 | 80.2 / 6.8 | 20.7 / 1.8 | 32.9 / 3.4 | 28.4 / 9.8 | 15.1 / 2.9 | 19.2 / 4.8 |
+
+Aggregate (mean of each cap-sensitive workload's J/job normalised to its own minimum; lower is better;
+"lowest acceptable" = lowest cap within 3 % of the best):
+
+| view | 4 | 5 | 5.5 | 6 | 6.5 | 7 | 7.5 | 8 | 9 | 10 | 12 | best | flat region | lowest acceptable |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SoC-only (screen on anyway) | 1.073 | 1.048 | 1.040 | **1.040** | 1.040 | 1.046 | 1.058 | 1.050 | 1.067 | 1.088 | 1.118 | 5.5 W | 5–9 W | 5 W |
+| whole-laptop (+4.0 W × time) | 1.455 | 1.221 | 1.147 | 1.112 | 1.079 | 1.056 | 1.046 | 1.020 | 1.010 | 1.015 | 1.029 | 9 W | 8–12 W | 8 W |
+
+What the re-test settles:
+
+* **Single-thread work does not see the cap at all.** PDF render, the Python job and single-core sha3 take the
+  same time and energy from 4 W to 12 W (one core under `balance_power` never needs more than ~4 W). Everything
+  interactive on this laptop is governed by the EPP, not the cap; section 3 already fixed that.
+* **For all-core work the SoC-only optimum is a broad plateau from 5.5 to 6.5 W**, with 6 W exactly at its
+  best value (1.040) and anything from 5 to 9 W within 3 %. zstd bottoms at 6.5 W, sha3 at 8 W, the parallel
+  PDF render at 5 W: the workloads disagree by ±1.5 W, which is why a plateau, not a point, is the honest answer.
+* **If the laptop is on only for the job, the optimum moves to 8–10 W.** With 4 W of panel/RAM/Wi-Fi charged to
+  the job, finishing faster wins: 6 W costs 10 % more whole-laptop energy per all-core job than 9 W, and 8 W is
+  within 1 % of the best. This is the one case where 6 W is the wrong number.
+* **At 6 W an all-core job takes 1.6× longer than at 10 W** (12.3 s vs 7.7 s for the zstd job). That is the
+  price, and it applies only to all-core work.
+
+Decision for this laptop: the intended use is "working on the machine with the screen on, occasionally running
+something heavy in the background", which is the SoC-only view, so **6 W stays**. A user who runs batch jobs and
+then closes the lid should set 8 W instead (`CAP=8/8` in `step58-power-final.sh`), which costs 1 % in the
+SoC-only view and gains 9 % in the whole-laptop view.
 
 ## Reproducing
 

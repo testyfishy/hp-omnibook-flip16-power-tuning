@@ -73,7 +73,8 @@ print(n,hashlib.sha256(s.encode()).hexdigest()[:8])
 PY
 chown -R $U:$U "$W"
 # warm the page cache and the binaries once
-asuser openssl dgst -sha3-256 "$W/big1g" >/dev/null; for i in 1 2 3 4 5 6 7 8; do asuser openssl dgst -sha3-256 "$W/blob$i" >/dev/null & done; wait
+# in a subshell: a bare `wait` in the main shell would also wait for the inhibitor jobs started above (never exit) -> hang
+bash -c "runuser -u $U -- openssl dgst -sha3-256 $W/big1g >/dev/null; for i in 1 2 3 4 5 6 7 8; do runuser -u $U -- openssl dgst -sha3-256 $W/blob\$i >/dev/null & done; wait"
 
 sampler() { local t pkg core unc bat batE v temp fan f sum mx x g
   exec 9<> <(:)
