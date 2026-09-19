@@ -1,405 +1,263 @@
 # Finding the power inflection point of a Lunar Lake laptop on Linux
 
-**HP OmniBook X Flip 16 (16-as0xxx), Intel Core Ultra 9 288V "Lunar Lake", Ubuntu 26.04, kernel 7.0.0-31, 2880×1800 120 Hz OLED.**
+**HP OmniBook X Flip 16 (16-as0xxx) · Intel Core Ultra 9 288V · Ubuntu 26.04 · kernel 7.0.0-31 · 2880×1800 120 Hz OLED · BIOS F.10**
 
-Aim: find the package power limit at which this chip does the most work per joule, set that as a manual
-*battery* profile for use on the go, and compare it against the stock *balanced* and *performance* profiles
-(same machine, same tasks, same telemetry). Everything here is measured, scripted and reproducible; the raw
-2 Hz power samples for every run are in `results/`.
+Aim: find the package power cap at which this chip does the most work per joule, install it as a manual
+*battery* profile, and compare it with the stock Balanced and Performance profiles on the same tasks with the
+same telemetry. Everything is measured, scripted and reproducible; the raw 2 Hz power samples of every run are
+in `results/`. Companion repo (same laptop): [touchscreen IRQ-routing fix](https://github.com/testyfishy/hp-omnibook-flip16-touchscreen-fix).
 
-Companion repo (same laptop): [touchscreen IRQ-routing fix](https://github.com/testyfishy/hp-omnibook-flip16-touchscreen-fix).
+## Result
 
-## TL;DR — final policy
-
-| | on battery (manual profile) | plugged in | "performance" |
+| | battery (installed) | plugged in | Performance |
 |---|---|---|---|
-| power-profiles-daemon profile | power-saver | balanced | performance (manual only) |
-| package cap PL1 / PL2 | **6 W / 6 W** | 30 W / 37 W | 30 W / 37 W |
-| CPU energy-performance preference (EPP) | **balance_power** (overridden) | balance_performance (ppd default) | performance |
-| iGPU ceiling | 1500 MHz | 2050 MHz | 2050 MHz |
-| panel refresh | 48 Hz | 120 Hz | 120 Hz |
+| power-profiles-daemon profile | power-saver | balanced | performance (manual) |
+| package cap PL1 / PL2 | **6 W / 6 W** | 30 / 37 W | 30 / 37 W |
+| CPU energy-performance preference (EPP) | **balance_power** (overridden) | balance_performance | performance |
+| iGPU ceiling · panel refresh | 1500 MHz · 48 Hz | 2050 MHz · 120 Hz | 2050 MHz · 120 Hz |
 
-Why 6 W and why balance_power:
-
-* **Sustained efficiency peaks at 6 W.** Joules per GB of all-core zstd: 174 (4 W) → 163 (5 W) → **149 (6 W)** →
-  153 (8 W) → 158 (10 W) → 173 (12 W) → 181 (firmware 12/21). Below 6 W the fixed SoC overhead dominates;
-  above it the V/f curve does. A second, more thorough test (11 caps, 3 passes, 6 workloads, section 6) puts
-  the SoC-only optimum on a plateau from 5.5 to 6.5 W and confirms 6 W; it also shows that if the screen is
-  charged to the job (batch then sleep) the optimum is 8–10 W.
-* **The cap barely touches daily use.** PDF rendering, an office conversion and a Python job took the *same*
-  time at 4 W as at the stock limits; only all-core compression slows (6.2 s at 6 W vs 3.8 s at 12 W).
-* **The energy-performance preference (EPP) matters more than the cap.** Stock Power Saver sets EPP `power`,
-  which parks single-thread work at 700–900 MHz. Changing only the EPP to `balance_power` at the same 6 W cap
-  (the *tuned Power Saver* below) made single-thread tasks **30–44 % faster** and interactive bursts
-  **13–16 % lower latency** for **+1.7 % SoC energy per task-set** and no change at idle (~0.50 W).
-* **PL1 = PL2 by design** ("no turbo"): the firmware's PL1 window is 28 s, PL2's is ~1 ms; equal limits make
-  the cap effectively instantaneous, and the 6/8 tier showed no benefit from a separate burst budget.
-* **Geekbench 6 at the 6 W policy: 1893 single / 4455 multi**, vs 3004 / 11451 plugged in, for 57 % less
-  energy per run and the best score per watt of the three configurations (section 5). Performance mode scored
-  the same as Balanced.
-* Under an all-core load with the cap binding, the iGPU is held at its 400 MHz floor (driver throttle reason =
-  PL1/PL2). CPU+GPU-heavy use (games) will crawl at 6 W; that is the point of the profile, not a bug.
-
-### The result in two figures
+* **6 W is where all-core work costs the fewest joules** (149 J/GB vs 174 at 4 W and 181 at stock); the
+  re-test puts the optimum on a plateau from 5.5 to 6.5 W.
+* **The cap does not touch ordinary use.** Single-thread tasks take the same time and energy from 4 W to 12 W.
+* **The EPP is what makes a capped laptop feel slow.** Changing it from `power` to `balance_power` at the same
+  6 W made single-thread tasks 30–44 % faster and bursts 14 % lower-latency for +1.7 % SoC energy.
+* **Geekbench 6 at the policy: 1893 / 4455** vs 3004 / 11451 plugged in, for 57 % less energy per run.
+  Performance mode is identical to Balanced on this machine.
+* One caveat: if the laptop is on *only* to run a batch job, the optimum is 8–10 W (section 6).
 
 ![efficiency vs cap](results/figures/fig1-efficiency-vs-cap.png)
-
 ![profiles at 6 W](results/figures/fig3-profiles-at-6w.png)
 
-Implementation: `scripts/power-switch.sh` + `scripts/power-switch.conf` (udev rule on the AC adapter, a boot
-service and a sleep hook re-apply it; installer `scripts/step13-power.sh`, EPP addition `scripts/step58-power-final.sh`).
+Implementation: `scripts/power-switch.sh` + `power-switch.conf` (udev rule on the adapter, boot service, sleep
+hook; installer `step13-power.sh`, EPP + cap step `step58-power-final.sh`, rollback included).
 
-## Methodology
+## Method
 
-### Names used throughout
+### Names
 
-Three CPU configurations are compared. Each is a GNOME / power-profiles-daemon profile plus what that profile
-sets on this machine (the CPU energy-performance preference, EPP, and the HP thermal mode), with the package
-power cap held at 6 W for the comparison:
-
-| name in this write-up | profile selected | EPP the CPU runs with | HP thermal mode | in the raw files |
+| name | profile | EPP | HP thermal mode | raw label |
 |---|---|---|---|---|
 | **stock Power Saver** | power-saver | `power` | quiet | `saver` |
 | **stock Balanced** | balanced | `balance_performance` | balanced | `balanced` |
-| **tuned Power Saver** (the final battery profile) | power-saver | `balance_power` (overridden after the profile is set) | quiet | `saver+bp` |
+| **tuned Power Saver** (installed) | power-saver | `balance_power` | quiet | `saver+bp` |
 
-EPP is the one knob the profiles really differ by for the CPU: it tells the hardware how eagerly to raise
-clocks inside whatever power budget it has. `power` is the most reluctant, `performance` the most eager;
-`balance_power` sits one step above `power`. Caps are written as PL1/PL2 in watts (sustained / burst limit;
-this work uses equal values so there is no burst budget).
+EPP tells the hardware how eagerly to raise clocks inside its power budget (`power` least, `performance`
+most). Caps are PL1/PL2 in watts (sustained / burst); all caps here use PL1 = PL2, so there is no burst budget.
 
-### Measurement choices
+### Measurement
 
-These follow the energy-benchmarking literature (references at the end):
+| item | choice | why |
+|---|---|---|
+| energy | RAPL package / core / uncore counters, 2 Hz, fork-free bash sampler | ~0.99 correlation with wall power, <2 % overhead (Khan 2018) |
+| whole laptop | BAT0 `energy_now` over whole runs (36 J steps); `power_now` ignored | `power_now` is EC-smoothed over tens of seconds (flat 6.5 W under any load) |
+| also logged | package temp, fan rpm, mean + peak core MHz, iGPU MHz, battery V | fan/thermal cost visible |
+| phases | markers per tier/phase; only intervals fully inside a phase count; rests excluded | no boundary mixing |
+| metric | energy-to-completion for fixed work (J per job), throughput for sustained runs | the quantity the cap actually trades |
+| order | caps ascending with a thermal gate (ref +3 °C) before each; profiles interleaved over all 6 permutations | thermal carry-over and drift cancel |
+| stats | median + IQR; paired per-round differences with 10 000-sample bootstrap 95 % CI | a difference counts only if the CI excludes 0 |
+| controls | blanking/suspend inhibited; brightness, Wi-Fi, background, panel refresh held; cap re-applied and read back after every profile switch | HP firmware pins one PL1 register at 12 W on battery; ppd writes EPP only on a profile *change* |
 
-* **Energy source.** Intel RAPL package energy (`/sys/class/powercap/intel-rapl:0/energy_uj`) sampled at 2 Hz
-  by a bash loop that forks nothing per sample (bash builtins + `read -t` as the timer). RAPL package energy
-  correlates ~0.99 with wall power and costs <2 % overhead (Khan et al. 2018). Battery `power_now` on this
-  laptop is EC-smoothed over tens of seconds and useless for anything shorter (it read 6.5 W flat through
-  every load phase); battery `energy_now` (10 mWh = 36 J steps) is used only for whole-tier drain.
-* **Telemetry per sample.** package / core / uncore energy, battery power / energy / voltage, package
-  temperature (coretemp), fan RPM (acpi_fan), mean and peak core MHz, iGPU MHz. Phase markers tag every sample
-  (tier, phase) so statistics are computed per phase, and only intervals lying entirely inside a phase count
-  (no boundary mixing). Rests between runs are excluded.
-* **Workloads.** Four daily-use tasks with fixed work (energy-to-completion): 40 pages of PDF rendered with
-  pdftoppm, a LibreOffice docx→pdf conversion, a 300 k-record JSON/regex/sort job in Python, and a 250 MB
-  `zstd -T0 -12` compression; a **40 s sustained** all-core zstd loop (throughput and J/GB); and for the
-  profile comparison a **bursty deadline workload** (20 × fixed single-thread bursts every 0.5 s, latency and
-  J per burst) because the racing-vs-pacing-to-idle question only shows up under deadlines.
-* **Order and thermal control.** Cap tiers run in *ascending* power order so heat carried over from a hotter
-  tier never lands on a cooler one; every tier waits for the package to return to a reference temperature
-  (+3 °C) before starting. Profiles are compared **interleaved**: six rounds, each a different permutation of
-  the three conditions, so every condition sits in every slot equally and drift cancels. A discarded warm-up
-  precedes the measured rounds.
-* **Statistics.** Medians with interquartile range; for the profile comparison per-round *paired* differences
-  against the baseline with a 10 000-resample bootstrap 95 % CI of the median difference and a win count.
-  A difference is reported only when the CI excludes zero.
-* **Controls.** Screen blanking and suspend inhibited; brightness, Wi-Fi, background processes and panel refresh
-  held constant (the 48 Hz follower is stopped during the profile comparison because it would otherwise change
-  with the profile); the cap is re-applied and read back from both RAPL interfaces after every profile switch
-  because the HP firmware pins the MMIO PL1 register at 12 W on battery and power-profiles-daemon only writes
-  EPP when the profile actually *changes*.
+### Workloads
+
+| job | what | type |
+|---|---|---|
+| pdf_render | 40 pages, pdftoppm 110 dpi | single-thread, real |
+| office | LibreOffice docx → pdf | single-thread, real |
+| python | 300 k-record JSON / regex / sort | single-thread, interpreter |
+| compress | 250 MB `zstd -T0 -12` | all-core, integer |
+| sustained | zstd loop, 20–40 s | all-core, throughput |
+| bursty | 20 × fixed single-thread burst every 0.5 s | interactive latency (racing vs pacing to idle) |
+| re-test additions | sha3-256 ×8 threads, PDF ×8 parallel, sha3-256 1 GB single | vector, real parallel, Geekbench-like single |
 
 ## Results
 
-### 0. Idle baseline (what the SoC costs when nothing happens)
+### 0 · Idle: what the SoC costs before any cap matters
 
-Screen on, battery, power-saver, hands off (`results/00-idle-baseline/`). SoC watts from turbostat, 20 s rows.
+![idle](results/figures/fig0-idle-walkdown.png)
 
-| scenario | SoC W | pkg C10 % | IRQ/s | note |
-|---|---|---|---|---|
-| baseline (Firefox + chat app open, 120 Hz) | 1.68 | 0 | 10 800 | package never reaches deep idle |
-| + panel at 48 Hz | 1.38 | 0.2 | 6 900 | −0.30 W from refresh alone |
-| + Firefox frozen | 1.02 | 3.4 | 2 200 | Firefox was rendering an animated tab continuously (−0.66 W) |
-| everything quiet | **0.51–0.55** | **59–60** | 700–950 | deep package idle is reachable with the screen on |
+| scenario (battery, screen on, hands off) | SoC W | pkg C10 % | IRQ/s |
+|---|---|---|---|
+| Firefox + chat app open, 120 Hz | 1.68 | 0 | 10 800 |
+| + panel 48 Hz | 1.38 | 0.2 | 6 900 |
+| + Firefox frozen (animated tab) | 1.02 | 3.4 | 2 200 |
+| everything quiet | **0.51–0.55** | **59–60** | 700–950 |
 
-![idle walk-down](results/figures/fig0-idle-walkdown.png)
+Suspend (s2idle, 5.5 h overnight): 0.62 W ≈ 0.95 % per hour. Deep package idle is reachable with the screen
+on; a rendering browser tab costs more than any cap saves. `results/00-idle-baseline/`.
 
-Overnight suspend (s2idle, 5.5 h): 0.62 W ≈ 0.95 % battery per hour.
+### 1 · Cap ladder, plugged in (Balanced) — locating the region
 
-### 1. Cap ladder, plugged in (balanced profile, EPP balance_performance)
+`results/01-ac-ladder/`, PL1 = PL2, 4-task set, best of 2.
 
-`results/01-ac-ladder/`. Best-of-2 per task, PL1 = PL2 strict caps, SoC energy per task-set.
+| cap | task-set s | task-set J | time | energy | | cap | task-set s | task-set J | time | energy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 30/37 | 10.0 | 178 | 1.00× | 1.00× | | 9 | 13.7 | 124 | 1.37× | 0.70× |
+| 20 | 10.4 | 152 | 1.04× | 0.86× | | **8** | 13.9 | **112** | 1.39× | **0.63×** |
+| 15 | 11.2 | 143 | 1.12× | 0.80× | | 7 | 16.9 | 119 | 1.69× | 0.67× |
+| 12 | 11.7 | 135 | 1.17× | 0.76× | | 6 | 20.2 | 123 | 2.02× | 0.69× |
+| 10 | 12.8 | 128 | 1.28× | 0.72× | | 5 | 25.0 | 128 | 2.50× | 0.72× |
 
-| PL1/PL2 (W) | total time (s) | total SoC energy (J) | slowdown | energy | pdf s | office s | python s | zstd s |
-|---|---|---|---|---|---|---|---|---|
-| default(30/37) | 10.0 | 178 | 1.00x | 1.00x | 5.92 | 0.90 | 0.98 | 2.20 |
-| 20(20/20) | 10.4 | 152 | 1.04x | 0.86x | 5.91 | 0.90 | 0.99 | 2.65 |
-| 15(15/15) | 11.2 | 143 | 1.12x | 0.81x | 6.05 | 1.00 | 1.02 | 3.12 |
-| 12(12/12) | 11.7 | 135 | 1.17x | 0.76x | 6.00 | 0.96 | 1.08 | 3.68 |
-| 10(10/10) | 12.8 | 128 | 1.28x | 0.72x | 6.30 | 1.07 | 1.15 | 4.29 |
-| 9(9/9) | 13.7 | 124 | 1.37x | 0.70x | 6.44 | 1.10 | 1.21 | 4.99 |
-| 8(8/8) | 13.9 | 112 | 1.39x | 0.63x | 6.45 | 1.13 | 1.23 | 5.12 |
-| 7(7/7) | 16.9 | 119 | 1.69x | 0.67x | 7.31 | 1.35 | 1.41 | 6.79 |
-| 6(6/6) | 20.2 | 123 | 2.02x | 0.69x | 8.18 | 1.44 | 1.62 | 9.00 |
-| 5(5/5) | 25.0 | 128 | 2.50x | 0.72x | 9.52 | 1.72 | 1.80 | 11.95 |
+Energy falls to 8 W and turns back up below 7 W: the region of interest is 5–8 W.
 
-Energy per task-set falls all the way down to 8 W (178 J → 112 J, −37 %) for a 1.4× slowdown that is almost
-entirely the all-core zstd task; below 7 W the energy curve turns back up. This located the region of interest
-(5–8 W) for the battery ladder.
+### 2 · Cap ladder, on battery (Power Saver, EPP power) — the inflection point
 
-### 2. Cap ladder, on battery (power-saver profile, EPP power) — the inflection point
-
-`results/02-battery-ladder/` (summary, tasks, 2 Hz samples, time series, chart). 13 tiers in ascending order,
-cool-down gate before each, 15 s idle + 4 tasks ×2 + 40 s sustained per tier. Fan never spun; package
-temperature 39–55 °C.
+`results/02-battery-ladder/`: 13 tiers ascending, cool-down gate, 15 s idle + 4 tasks ×2 + 40 s sustained each.
+Fan 0 rpm, 39–55 °C. Raw trace: `ladder2-20260918-2258.png`.
 
 ![daily tasks vs cap](results/figures/fig2-daily-tasks-vs-cap.png)
 
-(Raw 2 Hz power trace of the whole ladder: `results/02-battery-ladder/ladder2-20260918-2258.png`.)
-
-Sustained 40 s all-core zstd (where PL1 vs PL2 shows):
-
-| PL1/PL2 (W) | MB done | MB/s | SoC W mean | median W | p90 W | **SoC J/GB** |
-|---|---|---|---|---|---|---|
-| 4/4 | 1000 | 23.5 | 3.99 | 3.97 | 3.98 | 174 |
-| 5/5 | 1250 | 31.3 | 4.97 | 4.97 | 5.00 | 163 |
-| **6/6** | 1750 | 40.4 | 5.90 | 5.96 | 5.98 | **149** |
-| 4/8 | 1250 | 30.2 | 4.89 | 3.82 | 7.98 | 166 |
-| 5/8 | 1750 | 41.0 | 6.22 | 6.94 | 7.98 | 155 |
-| 6/8 | 2250 | 50.3 | 7.40 | 7.97 | 8.24 | 151 |
-| 8/8 | 2250 | 52.3 | 7.80 | 7.97 | 8.26 | 153 |
-| 8/8 @ balance_power | 2250 | 53.5 | 7.95 | 7.97 | 8.55 | 152 |
-| 8/12 | 2500 | 61.8 | 10.21 | 11.81 | 12.12 | 169 |
-| 8/15 | 2500 | 61.6 | 10.31 | 11.23 | 13.22 | 171 |
-| 10/10 | 2500 | 61.4 | 9.47 | 9.93 | 10.01 | 158 |
-| 12/12 | 2750 | 65.1 | 10.99 | 11.96 | 11.99 | 173 |
-| firmware (12/21) | 2750 | 66.7 | 11.81 | 12.73 | 13.39 | 181 |
-
-Short daily tasks, best of 2 (time and SoC energy of the 4-task set; ratios vs the firmware tier):
-
-| PL1/PL2 (W) | total s | SoC J | time | energy | pdf s | office s | python s | zstd s |
+| PL1/PL2 | sustained MB/s | sustained W | **J/GB** | short-set s | short-set J | zstd s | battery W | rest W |
 |---|---|---|---|---|---|---|---|---|
-| 4/4 | 30.8 | 83 | 1.28× | 1.00× | 15.2 | 2.4 | 2.7 | 10.5 |
-| 5/5 | 28.0 | 79 | 1.17× | 0.94× | 15.2 | 2.4 | 2.6 | 7.7 |
-| 6/6 | 26.6 | 76 | 1.11× | 0.91× | 15.4 | 2.4 | 2.7 | 6.2 |
-| 4/8 | 24.8 | 76 | 1.04× | 0.91× | 15.3 | 2.4 | 2.6 | 4.5 |
-| 6/8 | 24.9 | 78 | 1.04× | 0.93× | 14.9 | 2.4 | 2.7 | 4.8 |
-| 8/8 | 25.1 | 77 | 1.05× | 0.92× | 15.3 | 2.4 | 2.6 | 4.7 |
-| **8/8 @ balance_power** | **17.7** | 78 | **0.74×** | 0.93× | **9.9** | **1.7** | **1.5** | 4.6 |
-| 10/10 | 24.2 | 79 | 1.01× | 0.94× | 15.0 | 2.4 | 2.7 | 4.1 |
-| 12/12 | 23.8 | 82 | 0.99× | 0.98× | 14.9 | 2.4 | 2.6 | 3.9 |
-| firmware (12/21) | 24.0 | 84 | 1.00× | 1.00× | 15.1 | 2.4 | 2.7 | 3.8 |
+| 4/4 | 23.5 | 3.99 | 174 | 30.8 | 83 | 10.5 | 5.85 | 3.52 |
+| 5/5 | 31.3 | 4.97 | 163 | 28.0 | 79 | 7.7 | 6.17 | 3.61 |
+| **6/6** | 40.4 | 5.90 | **149** | 26.6 | 76 | 6.2 | 6.61 | 3.72 |
+| 4/8 | 30.2 | 4.89 | 166 | 24.8 | 76 | 4.5 | 6.36 | 3.74 |
+| 6/8 | 50.3 | 7.40 | 151 | 24.9 | 78 | 4.8 | 7.40 | 3.97 |
+| 8/8 | 52.3 | 7.80 | 153 | 25.1 | 77 | 4.7 | 7.49 | 3.98 |
+| **8/8 @ balance_power** | 53.5 | 7.95 | 152 | **17.7** | 78 | 4.6 | 8.11 | 4.19 |
+| 10/10 | 61.4 | 9.47 | 158 | 24.2 | 79 | 4.1 | 8.19 | 4.18 |
+| 12/12 | 65.1 | 10.99 | 173 | 23.8 | 82 | 3.9 | 8.63 | 4.11 |
+| stock 12/21 | 66.7 | 11.81 | 181 | 24.0 | 84 | 3.8 | 8.94 | 4.19 |
 
-Whole-tier view (battery drain from `energy_now`, "rest" = everything that is not the SoC: panel, RAM, Wi-Fi):
+* J/GB bottoms at 6 W; a separate burst budget (x/8) buys nothing over PL1 = PL2.
+* The short set is flat from 4 W up except the all-core zstd task (pdf 15 s, office 2.4 s, python 2.6 s at
+  every cap) — until the EPP changes: the 8/8 balance_power row runs the same set in 17.7 s for the same energy.
+  That row became experiment 3.
+* "rest W" (panel, RAM, Wi-Fi) is 3.5–4.2 W whatever the cap. Full per-phase statistics: `ladder2-…summary.txt`.
 
-| PL1/PL2 (W) | tier s | battery W | SoC W | rest W | idle SoC W | sustained W | pkg T0 → Tmax °C |
-|---|---|---|---|---|---|---|---|
-| 4/4 | 160 | 5.85 | 2.33 | 3.52 | 0.66 | 3.97 | 39 → 42 |
-| 6/6 | 152 | 6.61 | 2.89 | 3.72 | 0.51 | 5.89 | 40 → 45 |
-| 8/8 | 149 | 7.49 | 3.51 | 3.98 | 0.65 | 7.79 | 40 → 49 |
-| 12/12 | 146 | 8.63 | 4.52 | 4.11 | 0.50 | 11.02 | 40 → 54 |
-| firmware (12/21) | 145 | 8.94 | 4.74 | 4.19 | 0.64 | 11.84 | 40 → 55 |
+### 3 · Profile comparison at a fixed 6 W cap (interleaved A/B/C)
 
-Per-tier / per-phase mean, median, p10, p90, max power for every phase: `results/02-battery-ladder/ladder2-20260918-2258.summary.txt`.
+`results/03-profile-ab/`: 6 rounds × 3 conditions, 48 Hz frozen, 10 s idle + 20 bursts + 4 tasks + 20 s sustained
+per trial. Rounds 2–3 of stock Power Saver were contaminated (daemon saw "no profile change" and left
+`balance_power` in place; two fast outliers in `summary.txt`); the clean rounds 1, 4, 5, 6 are used
+(`summary-clean-rounds-1-4-5-6.txt`); the runner now sets EPP explicitly.
 
-Reading: the **6 W equal cap is the inflection point** for sustained work (best J/GB), the short tasks are
-insensitive to the cap, and the one row that broke the pattern (8/8 with EPP `balance_power`, the ★ in the
-figure) said that the EPP, not the cap, was throttling single-thread work. That became experiment 3.
+![paired differences](results/figures/fig7-profile-paired-diffs.png)
 
-### 3. Profile comparison at a fixed 6/6 W cap (interleaved A/B/C)
-
-`results/03-profile-ab/`. The three configurations defined under *Names used throughout*, all at a 6/6 W cap:
-stock Power Saver, stock Balanced, tuned Power Saver. Six rounds, six permutations, panel refresh frozen at 48 Hz.
-
-![profiles at 6 W](results/figures/fig3-profiles-at-6w.png)
-
-Rounds 2 and 3 of the *stock Power Saver* condition were contaminated (it was requested right after the tuned
-condition, the daemon saw "no profile change" and left `balance_power` in place; visible as two fast outliers
-in `summary.txt`). The clean analysis below uses rounds 1, 4, 5, 6 (`summary-clean-rounds-1-4-5-6.txt`); the
-runner now sets the EPP explicitly for every condition.
-
-Per-condition medians (clean rounds):
-
-| metric | stock Power Saver | stock Balanced | tuned Power Saver |
+| median of 4 rounds | stock Power Saver | stock Balanced | tuned Power Saver |
 |---|---|---|---|
-| idle SoC W | 0.500 | 0.523 | 0.502 |
 | burst latency median / p95 (ms) | 134 / 141 | 116 / 119 | 116 / 118 |
-| burst J per burst | 0.470 | 0.482 | 0.477 |
-| pdf render s / J | 14.99 / 27.3 | 9.85 / 28.5 | 9.80 / 28.5 |
-| office s / J | 2.46 / 5.85 | 1.64 / 6.15 | 1.69 / 6.25 |
-| python s / J | 2.65 / 6.70 | 1.48 / 7.80 | 1.49 / 7.75 |
-| zstd s / J | 6.18 / 36.8 | 6.21 / 37.1 | 6.13 / 36.8 |
+| pdf · office · python · zstd time (s) | 15.0 · 2.46 · 2.65 · 6.18 | 9.85 · 1.64 · 1.48 · 6.21 | 9.80 · 1.69 · 1.49 · 6.13 |
+| pdf · office · python · zstd energy (J) | 27.3 · 5.85 · 6.70 · 36.8 | 28.5 · 6.15 · 7.80 · 37.1 | 28.5 · 6.25 · 7.75 · 36.8 |
 | sustained MB/s · W · J/GB | 40.1 · 5.90 · 150.5 | 40.7 · 5.98 · 150.4 | 40.4 · 5.97 · 151.1 |
-| whole-trial SoC Wh | 0.071 | 0.072 | 0.072 |
-| trial length s | 96.8 | 89.4 | 89.4 |
-| package Tmax °C | 44.5 | 48 | 48 |
+| whole-trial SoC Wh · idle W · Tmax | 0.071 · 0.500 · 44.5 °C | 0.072 · 0.523 · 48 °C | 0.072 · 0.502 · 48 °C |
 
-Paired differences against stock Power Saver (median of the per-round differences, 95 % bootstrap CI, wins;
-* = CI excludes 0):
+* Both alternatives: single-thread tasks −30…−44 %, burst latency −14…−16 %, in 4/4 rounds (CIs exclude 0).
+* Cost: +5…+16 % J on the short tasks, +1.5 % sustained W, +1.7 % (tuned) / +2.9 % (Balanced) SoC Wh per
+  trial; idle unchanged.
+* Tuned Power Saver = Balanced's speed at lower energy with the quiet fan mode → installed.
 
-| metric | stock Balanced − stock Power Saver | tuned Power Saver − stock Power Saver |
+### 4 · Stress verification of the installed policy
+
+`results/04-stress-verify/`: idle → single-thread → all-core zstd −19 → openssl ×8 → openssl ×8 + iGPU → idle.
+
+![stress](results/figures/fig4-stress-trace.png)
+
+| phase | SoC W mean / median / p99 / max | pkg T |
 |---|---|---|
-| burst latency median (ms) | −18.0 [−21.6, −11.6] 4/4 * | −18.9 [−20.7, −14.1] 4/4 * |
-| burst latency p95 (ms) | −22.6 [−23.0, −22.1] 4/4 * | −22.9 [−24.6, −22.7] 4/4 * |
-| pdf render s | −5.14 (−34 %) 4/4 * | −5.19 (−35 %) 4/4 * |
-| office s | −0.83 (−34 %) 4/4 * | −0.75 (−30 %) 4/4 * |
-| python s | −1.17 (−44 %) 4/4 * | −1.16 (−44 %) 4/4 * |
-| pdf / office / python J | +6 % / +10 % / +16 % * | +5 % / +9 % / +15 % * |
-| zstd J | +0.5 % * | +0.4 % (n.s.) |
-| sustained MB/s | +1.5 % * | +1.1 % * |
-| sustained SoC W | +0.09 * | +0.08 * |
-| whole-trial SoC Wh | +2.9 % * | +1.7 % * |
-| idle SoC W | n.s. | n.s. |
+| idle · recovery | 0.50 / 0.42 / – / 1.34 · 0.53 / 0.44 / – / 1.28 | 32 · 42 °C |
+| single-thread (peak core 3100 MHz) | 4.35 / 4.29 / – / 5.19 | 44 °C |
+| all-core zstd −19, 90 s | 5.93 / 5.96 / 6.91 / 7.19 | 43 °C |
+| all-core openssl ×8 | 5.93 / 5.97 / 6.14 / 7.46 | 47 °C |
+| openssl ×8 + iGPU (iGPU held at 400 MHz floor) | 5.97 / 5.97 / 6.03 / 6.43 | 48 °C |
 
-Verdict: both alternatives buy a third less latency on everything interactive for a couple of percent of
-SoC energy under load and nothing at idle. The tuned Power Saver gets the same speed as stock Balanced for
-less energy and keeps the quiet fan mode, so it is the one applied.
+Fan 0 rpm, 0 thermal-throttle events, EPP and caps unchanged at the end. The PL1 window is 28 s and PL2's ~1 ms,
+so PL1 = PL2 makes the cap effectively instantaneous. CPU+GPU-heavy use (games) will crawl at 6 W by design.
 
-### 4. Stress verification of the final policy
+### 5 · Geekbench 6 across the three configurations
 
-`results/04-stress-verify/` (console log with per-phase readbacks, turbostat 10 s summaries, samples, chart).
-On battery with the final policy active: 20 s idle → 30 s single-thread → 90 s all-core `zstd -19` →
-all-core `openssl speed sha256` ×8 → the same plus the iGPU (glxgears, vsync off) → 30 s recovery.
-
-![stress trace](results/figures/fig4-stress-trace.png)
-
-| phase | SoC W mean / median / p99 / max | pkg T | note |
-|---|---|---|---|
-| idle | 0.50 / 0.42 / – / 1.34 | 32 °C | |
-| single-thread | 4.35 / 4.29 / – / 5.19 | 44 °C | fastest core **3100 MHz** |
-| all-core zstd −19 (90 s) | 5.93 / 5.96 / 6.91 / 7.19 | 43 °C | one 7.2 W sample |
-| all-core openssl ×8 | 5.93 / 5.97 / 6.14 / 7.46 | 47 °C | |
-| openssl ×8 + iGPU | 5.97 / 5.97 / 6.03 / 6.43 | 48 °C | iGPU held at 400 MHz floor |
-| recovery idle | 0.53 / 0.44 / – / 1.28 | 42 °C | |
-
-Fan 0 rpm throughout, package max 49 °C, zero thermal-throttle events, EPP `balance_power` on all CPUs and
-caps 6/6 unchanged at the end. All checks passed.
-
-### 5. Geekbench 6 across the three configurations
-
-`results/05-geekbench/`. Geekbench 6.7.1 CPU, run by `scripts/step60-geekbench.sh` with the same 2 Hz
-telemetry: first on battery under the final policy, then plugged in with the stock Balanced profile, then in
-Performance mode (switched by the script and restored afterwards). The battery configuration was run twice.
-Result pages are public on the Geekbench Browser.
+`results/05-geekbench/` (public result pages; scores read from headless-browser screenshots, `*.scores.txt`).
 
 ![geekbench](results/figures/fig5-geekbench.png)
 
-| configuration | cap PL1/PL2 | EPP | single-core | multi-core | run s | SoC W mean / max | Wh per run | pkg Tmax | fan | result |
-|---|---|---|---|---|---|---|---|---|---|---|
-| **battery, tuned Power Saver** | 6/6 W | balance_power | **1893** | **4455** | 344 | 2.96 / 7.9 | **0.283** | 51 °C | 0 rpm | [19213634](https://browser.geekbench.com/v6/cpu/19213634) |
-| battery, tuned Power Saver (repeat) | 6/6 W | balance_power | 1835 | 4434 | 346 | 3.09 / – | 0.297 | – | 0 rpm | [19213540](https://browser.geekbench.com/v6/cpu/19213540) |
-| plugged in, stock Balanced | 30/37 W | balance_performance | 3004 | 11451 | 262 | 8.96 / 37.0 | 0.652 | 95 °C | 2550 rpm | [19213676](https://browser.geekbench.com/v6/cpu/19213676) |
-| plugged in, Performance | 30/37 W | performance | 2974 | 11431 | 262 | 9.77 / 37.1 | 0.711 | 94 °C | 2350 rpm | [19213724](https://browser.geekbench.com/v6/cpu/19213724) |
+| configuration | single | multi | run s | SoC W mean / max | Wh / run | multi per W | Tmax · fan | result |
+|---|---|---|---|---|---|---|---|---|
+| **battery, tuned Power Saver, 6 W** | **1893** | **4455** | 344 | 2.96 / 7.9 | **0.283** | **1504** | 51 °C · 0 | [19213634](https://browser.geekbench.com/v6/cpu/19213634) |
+| same, repeat | 1835 | 4434 | 346 | 3.09 / – | 0.297 | 1435 | – | [19213540](https://browser.geekbench.com/v6/cpu/19213540) |
+| plugged in, stock Balanced, 30/37 W | 3004 | 11451 | 262 | 8.96 / 37.0 | 0.652 | 1277 | 95 °C · 2550 | [19213676](https://browser.geekbench.com/v6/cpu/19213676) |
+| plugged in, Performance, 30/37 W | 2974 | 11431 | 262 | 9.77 / 37.1 | 0.711 | 1170 | 94 °C · 2350 | [19213724](https://browser.geekbench.com/v6/cpu/19213724) |
 
-Relative to the battery configuration:
+* Capped: −37 % single, −61 % multi, −57 % energy per run, best score per watt. Geekbench's single-core tests
+  pull one core above 6 W, unlike the light daily tasks, so the cap shows here where it did not in section 2.
+* Performance = Balanced (same caps); it only adds fan and 9 % energy. Repeatability within 3 %.
 
-| | single-core | multi-core | energy per run | multi-core score per mean SoC watt |
-|---|---|---|---|---|
-| battery, 6 W | 1.00× | 1.00× | 1.00× | **1504** |
-| plugged in, Balanced | 1.59× | 2.57× | 2.30× | 1277 |
-| plugged in, Performance | 1.57× | 2.57× | 2.51× | 1170 |
+### 6 · Robust inflection-point re-test — 6 W confirmed for the intended use
 
-Reading:
+`results/06-inflection/`: 11 caps (4…12 W, 0.5 W steps around 6), 3 passes (ascending / descending /
+shuffled), EPP `balance_power`, thermal gate + 10 s idle per cap, 6 fixed-work jobs. 41 min, fan 0 rpm, every
+cap started at 39 °C, pass-to-pass spread 1–3 %. Rest-of-system over the run: 4.00 W.
 
-* **Repeatability** of the capped run is within 3 % (1835/4434 vs 1893/4455).
-* **Performance mode buys nothing over Balanced** on this machine: same caps (30/37 W), scores identical
-  within noise, 9 % more energy and a spinning fan. It is a fan-curve/EPP change, not a power-limit change.
-* **The 6 W cap costs 37 % single-core and 61 % multi-core** on Geekbench, for **57 % less energy per run**
-  and the best score-per-watt of the three. Geekbench's single-core workloads (vectorised, memory-heavy) do
-  draw more than 6 W on one core, unlike the light single-thread daily tasks in section 2, which were
-  cap-insensitive down to 4 W; so the cap *does* show on this benchmark where it did not on the daily tasks.
-* Plugged in, the package reaches 95 °C during Geekbench; on battery it stays at 51 °C with the fan off.
+![inflection re-test](results/figures/fig6-inflection-retest.png)
 
-### 6. Robust inflection-point re-test — 6 W confirmed for the intended use
+SoC J per job (median of 3) · time per job (s):
 
-`results/06-inflection/`. 11 caps (4, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9, 10, 12 W, PL1 = PL2), three passes in
-ascending, descending and shuffled order, EPP `balance_power` (the installed policy), thermal gate and 10 s idle
-before every cap, six fixed-work jobs. 41 minutes on battery, fan never spun, every cap started at 39 °C.
-Rest-of-system power measured over the whole run: **4.00 W** (battery 4.67 Wh − SoC 1.93 Wh). Spread between
-passes was 1–3 % of the median for almost every cell, so the curves below are real, not noise.
-
-![inflection re-test](results/06-inflection/inflection-20260919-0634.png)
-
-SoC energy per job (J, median of 3 passes) and time per job (s):
-
-| cap (W) | zstd all-core J / s | sha3 ×8 J / s | PDF ×8 parallel J / s | PDF single J / s | python J / s | sha3 single J / s |
+| cap W | zstd ×8 | sha3 ×8 | PDF ×8 | PDF single | python | sha3 single |
 |---|---|---|---|---|---|---|
-| 4 | 85.2 / 21.3 | 21.1 / 5.1 | 27.3 / 6.8 | 27.9 / 9.9 | 13.7 / 3.4 | 19.2 / 4.9 |
-| 5 | 78.3 / 15.7 | 19.4 / 3.8 | **26.1** / 5.2 | 28.2 / 9.8 | 14.9 / 3.0 | 19.6 / 4.7 |
-| 5.5 | 75.6 / 13.8 | 18.8 / 3.3 | 26.4 / 4.8 | 28.1 / 9.8 | 15.0 / 2.9 | 19.8 / 4.8 |
-| **6** | 73.3 / 12.3 | 18.8 / 3.1 | 27.5 / 4.6 | 28.4 / 9.8 | 15.0 / 2.9 | 19.6 / 4.7 |
-| 6.5 | **72.6** / 11.2 | 18.8 / 2.9 | 27.9 / 4.3 | 28.5 / 9.8 | 15.0 / 3.0 | 19.5 / 4.8 |
-| 7 | 73.5 / 10.6 | 18.8 / 2.6 | 28.0 / 4.0 | 28.4 / 9.9 | 15.1 / 2.9 | 19.6 / 4.8 |
-| 7.5 | 74.7 / 10.0 | 18.8 / 2.5 | 28.6 / 3.9 | 28.2 / 9.9 | 15.4 / 2.9 | 19.6 / 4.8 |
-| 8 | 74.8 / 9.4 | **18.4** / 2.3 | 29.0 / 3.6 | 28.7 / 9.9 | 15.1 / 2.9 | 19.3 / 4.7 |
-| 9 | 73.9 / 8.3 | 19.1 / 2.1 | 30.4 / 3.5 | 28.0 / 9.8 | 15.0 / 2.9 | 19.6 / 4.8 |
-| 10 | 75.7 / 7.7 | 19.5 / 2.0 | 31.9 / 3.4 | 28.2 / 9.9 | 15.0 / 2.9 | 19.6 / 4.7 |
-| 12 | 80.2 / 6.8 | 20.7 / 1.8 | 32.9 / 3.4 | 28.4 / 9.8 | 15.1 / 2.9 | 19.2 / 4.8 |
+| 4 | 85.2 · 21.3 | 21.1 · 5.1 | 27.3 · 6.8 | 27.9 · 9.9 | 13.7 · 3.4 | 19.2 · 4.9 |
+| 5 | 78.3 · 15.7 | 19.4 · 3.8 | **26.1** · 5.2 | 28.2 · 9.8 | 14.9 · 3.0 | 19.6 · 4.7 |
+| 5.5 | 75.6 · 13.8 | 18.8 · 3.3 | 26.4 · 4.8 | 28.1 · 9.8 | 15.0 · 2.9 | 19.8 · 4.8 |
+| **6** | 73.3 · 12.3 | 18.8 · 3.1 | 27.5 · 4.6 | 28.4 · 9.8 | 15.0 · 2.9 | 19.6 · 4.7 |
+| 6.5 | **72.6** · 11.2 | 18.8 · 2.9 | 27.9 · 4.3 | 28.5 · 9.8 | 15.0 · 3.0 | 19.5 · 4.8 |
+| 7 | 73.5 · 10.6 | 18.8 · 2.6 | 28.0 · 4.0 | 28.4 · 9.9 | 15.1 · 2.9 | 19.6 · 4.8 |
+| 8 | 74.8 · 9.4 | **18.4** · 2.3 | 29.0 · 3.6 | 28.7 · 9.9 | 15.1 · 2.9 | 19.3 · 4.7 |
+| 9 | 73.9 · 8.3 | 19.1 · 2.1 | 30.4 · 3.5 | 28.0 · 9.8 | 15.0 · 2.9 | 19.6 · 4.8 |
+| 10 | 75.7 · 7.7 | 19.5 · 2.0 | 31.9 · 3.4 | 28.2 · 9.9 | 15.0 · 2.9 | 19.6 · 4.7 |
+| 12 | 80.2 · 6.8 | 20.7 · 1.8 | 32.9 · 3.4 | 28.4 · 9.8 | 15.1 · 2.9 | 19.2 · 4.8 |
 
-Aggregate (mean of each cap-sensitive workload's J/job normalised to its own minimum; lower is better;
-"lowest acceptable" = lowest cap within 3 % of the best):
+Aggregate (mean of each cap-sensitive job's J normalised to its own minimum; "lowest acceptable" = lowest cap
+within 3 % of the best):
 
-| view | 4 | 5 | 5.5 | 6 | 6.5 | 7 | 7.5 | 8 | 9 | 10 | 12 | best | flat region | lowest acceptable |
+| view | 4 | 5 | 5.5 | **6** | 6.5 | 7 | 7.5 | 8 | 9 | 10 | 12 | best | ≤ 3 % | lowest ok |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | SoC-only (screen on anyway) | 1.073 | 1.048 | 1.040 | **1.040** | 1.040 | 1.046 | 1.058 | 1.050 | 1.067 | 1.088 | 1.118 | 5.5 W | 5–9 W | 5 W |
 | whole-laptop (+4.0 W × time) | 1.455 | 1.221 | 1.147 | 1.112 | 1.079 | 1.056 | 1.046 | 1.020 | 1.010 | 1.015 | 1.029 | 9 W | 8–12 W | 8 W |
 
-What the re-test settles:
-
-* **Single-thread work does not see the cap at all.** PDF render, the Python job and single-core sha3 take the
-  same time and energy from 4 W to 12 W (one core under `balance_power` never needs more than ~4 W). Everything
-  interactive on this laptop is governed by the EPP, not the cap; section 3 already fixed that.
-* **For all-core work the SoC-only optimum is a broad plateau from 5.5 to 6.5 W**, with 6 W exactly at its
-  best value (1.040) and anything from 5 to 9 W within 3 %. zstd bottoms at 6.5 W, sha3 at 8 W, the parallel
-  PDF render at 5 W: the workloads disagree by ±1.5 W, which is why a plateau, not a point, is the honest answer.
-* **If the laptop is on only for the job, the optimum moves to 8–10 W.** With 4 W of panel/RAM/Wi-Fi charged to
-  the job, finishing faster wins: 6 W costs 10 % more whole-laptop energy per all-core job than 9 W, and 8 W is
-  within 1 % of the best. This is the one case where 6 W is the wrong number.
-* **At 6 W an all-core job takes 1.6× longer than at 10 W** (12.3 s vs 7.7 s for the zstd job). That is the
-  price, and it applies only to all-core work.
-
-Decision for this laptop: the intended use is "working on the machine with the screen on, occasionally running
-something heavy in the background", which is the SoC-only view, so **6 W stays**. A user who runs batch jobs and
-then closes the lid should set 8 W instead (`CAP=8/8` in `step58-power-final.sh`), which costs 1 % in the
-SoC-only view and gains 9 % in the whole-laptop view.
+* Single-thread jobs are cap-insensitive from 4 to 12 W (one core under `balance_power` needs < 4 W).
+* All-core jobs: SoC-only optimum is a plateau 5.5–6.5 W with 6 W on its floor; the jobs disagree by ±1.5 W.
+* If the laptop is on only for the job, 8–10 W wins (6 W costs +10 % whole-laptop energy per all-core job)
+  and the job runs 1.6× faster. Intended use here is screen-on work with occasional heavy background jobs →
+  **6 W stays**; batch-then-sleep users should set 8 W (`CAP=8/8 step58-power-final.sh`).
 
 ## Reproducing
 
-All scripts are self-contained bash + Python 3 (standard library + Pillow for the charts). They need root for
-RAPL energy counters and power caps, and are written for Ubuntu 26.04 with power-profiles-daemon 0.30 and
-intel_pstate in active mode; adapt the RAPL / hwmon paths for other machines.
+Bash + Python 3 (Pillow for charts; matplotlib for `make-figures.py`); root for RAPL counters and caps;
+Ubuntu 26.04 with power-profiles-daemon 0.30 and intel_pstate active. Adapt RAPL/hwmon paths elsewhere.
 
 ```
-sudo bash scripts/step14c-ladder-battery.sh                   # cap ladder on battery (~35 min); TIERS_OVERRIDE="3/3 4/4 …" for other tiers
-sudo bash scripts/step14d-epp-ab.sh                           # profile A/B/C at a fixed cap (~25 min); CAP=6/6 ROUNDS=6
-sudo bash scripts/step59-stress-verify.sh                     # stress + PASS/FAIL checks of the installed policy (~6 min)
-sudo bash scripts/step60-geekbench.sh                         # Geekbench across battery/AC/performance (needs bench/Geekbench-6.7.1-Linux)
-python3 scripts/ladder-analyze.py results/02-battery-ladder/ladder2-20260918-2258     # re-analyse any run
+sudo bash scripts/step14c-ladder-battery.sh      # cap ladder (~35 min);  TIERS_OVERRIDE="3/3 4/4 …"
+sudo bash scripts/step14d-epp-ab.sh              # profile A/B/C at a fixed cap (~25 min);  CAP=6/6 ROUNDS=6
+sudo bash scripts/step59-stress-verify.sh        # stress + PASS/FAIL of the installed policy (~6 min)
+sudo bash scripts/step60-geekbench.sh            # Geekbench battery → AC → Performance (needs bench/Geekbench-6.7.1-Linux)
+sudo bash scripts/step61-inflection.sh           # robust inflection re-test (~45 min);  CAPS="5 6 7" PASSES=2
+python3 scripts/ladder-analyze.py results/02-battery-ladder/ladder2-20260918-2258      # re-analyse any run
 python3 scripts/ab-analyze.py results/03-profile-ab/ab-20260918-2356
-python3 scripts/make-figures.py                               # regenerate results/figures/ (needs matplotlib)
+python3 scripts/inflection-analyze.py results/06-inflection/inflection-20260919-0634
+python3 scripts/make-figures.py                  # regenerate results/figures/
 ```
 
-Optional `PDF=/path/to/some.pdf` gives the render task a real document (the published runs used a 4.4 MB,
-40-page journal PDF with figures; without it the scripts render the generated sample document, which is lighter).
-
-To install the policy on a similar machine: `sudo bash scripts/step13-power.sh` (udev rule, boot service,
-sleep hook, config), then `sudo bash scripts/step58-power-final.sh` (6/6 W + EPP override). Rollback scripts
-are included. Note that choosing a profile by hand in GNOME quick settings lets the daemon rewrite the EPP
-until the next adapter event, boot or resume.
+`PDF=/path/to/some.pdf` gives the render jobs a real document (the published runs used a 4.4 MB, 40-page
+journal PDF; the fallback is a generated, lighter one). Install the policy: `step13-power.sh` then
+`step58-power-final.sh`; rollbacks included. Choosing a profile by hand in GNOME lets the daemon rewrite the
+EPP until the next adapter event, boot or resume.
 
 ## Caveats
 
-* One laptop, one firmware (BIOS F.10). The HP firmware pins one PL1 register at 12 W on battery; the caps
-  were verified through the RAPL MSR interface and, more importantly, through the measured power.
-* The 6 W figure is this chip's inflection point for *this* sustained workload (zstd). The short tasks were
-  cap-insensitive from 4 W upward, so a different sustained workload could move the optimum by a watt.
-* Battery `power_now` on this EC is not usable for sub-minute measurements; whole-laptop numbers come from
-  `energy_now` over ≥2-minute tiers and carry a 36 J quantisation.
-* Wine-based Cinebench was not run (no Linux build; results would be neither comparable nor submittable).
-* Geekbench's free Linux build prints no scores locally and its result pages sit behind a bot check; the
-  scores in section 5 were read from headless-browser screenshots of the public result pages
-  (`results/05-geekbench/*.page.png`) and recorded in `*.scores.txt` sidecar files.
+* One laptop, one firmware. The HP firmware pins one PL1 register at 12 W on battery; caps were verified via
+  the MSR interface and, decisively, via measured power.
+* The optimum is a 5.5–6.5 W plateau for these all-core workloads; a very different sustained load could move
+  it by a watt. Single-thread work is insensitive either way.
+* Battery `power_now` is unusable below a minute on this EC; whole-laptop figures come from `energy_now` over
+  ≥ 2-minute windows (36 J quantisation).
+* No Cinebench (no Linux build). Geekbench's free CLI prints no scores; they were read from the public pages.
 
 ## References
 
-* K. N. Khan, M. Hirki, T. Niemi, J. K. Nurminen, Z. Ou, *RAPL in Action: Experiences in Using RAPL for Power Measurements*, ACM TOMPECS 3(2), 2018. https://doi.org/10.1145/3177754
-* H. Hoffmann et al., *Racing and Pacing to Idle: Minimizing Energy Under Performance Constraints*, U. Chicago TR-2014-10. https://newtraell.cs.uchicago.edu/files/tr_authentic/TR-2014-10.pdf
-* *Systematic Detection of Energy Regression and Corresponding Code Patterns in Java Projects* (randomised order, warm-up, thermal gate, repeated trials, medians), arXiv:2604.19373.
-* *What Is the Cost of Energy Monitoring? An Empirical Study on the Overhead of RAPL-Based Tools*, arXiv:2604.26815.
-* power-profiles-daemon README (profile → platform_profile + EPP mapping). https://gitlab.freedesktop.org/upower/power-profiles-daemon
-* Linux kernel documentation, *Intel Performance and Energy Bias Hint* and *intel_pstate*. https://www.kernel.org/doc/html/latest/admin-guide/pm/
+* Khan, Hirki, Niemi, Nurminen, Ou, *RAPL in Action*, ACM TOMPECS 3(2), 2018. https://doi.org/10.1145/3177754
+* Hoffmann et al., *Racing and Pacing to Idle*, U. Chicago TR-2014-10. https://newtraell.cs.uchicago.edu/files/tr_authentic/TR-2014-10.pdf
+* *Systematic Detection of Energy Regression … in Java Projects*, arXiv:2604.19373 (order randomisation, warm-up, thermal gate, repeats, medians).
+* *What Is the Cost of Energy Monitoring? … RAPL-Based Tools*, arXiv:2604.26815.
+* power-profiles-daemon README; Linux kernel docs *intel_pstate* and *Intel Performance and Energy Bias Hint*.
 
 ## License
 
-MIT (scripts and write-up). Measurement data in `results/` may be reused freely with attribution.
+MIT for scripts and write-up; data in `results/` may be reused with attribution.

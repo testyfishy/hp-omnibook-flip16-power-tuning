@@ -124,3 +124,63 @@ if os.path.exists(GBMD):
     for b, e in zip(b3, wh): a2.text(b.get_x() + b.get_width() / 2, b.get_height() + 25, f"{b.get_height():.0f}\n({e:.2f} Wh/run)", ha="center", fontsize=8)
     a2.set_xticks(x); a2.set_xticklabels(labs, fontsize=8.5); a2.set_ylabel("multi-core score per mean SoC watt"); a2.set_ylim(0, 1900); a2.set_title("Efficiency (higher = better)")
     save(fig, "fig5-geekbench")
+
+# ---------- Fig 6: inflection re-test — aggregate curves and the time price
+INF = os.path.join(RES, "06-inflection", "inflection-20260919-0634")
+if os.path.exists(INF + ".tasks.tsv"):
+    rows = [l.rstrip("\n").split("\t") for l in open(INF + ".tasks.tsv")][1:]
+    rest = 4.0
+    try: rest = float(re.search(r"rest-of-system ([0-9.]+) W", open(INF + ".summary.txt").read()).group(1))
+    except Exception: pass
+    D = {}
+    for r in rows: D.setdefault(r[1], {}).setdefault(float(r[0].split("W#")[0]), []).append((float(r[2]), float(r[5])))
+    caps = sorted({c for n in D for c in D[n]}); TOL = 0.03
+    soc = {n: {c: st.median([j for _, j in D[n][c]]) for c in D[n]} for n in D}
+    wl = {n: {c: st.median([j + rest * s for s, j in D[n][c]]) for c in D[n]} for n in D}
+    def agg(table):
+        sens = [n for n in table if max(table[n].values()) / min(table[n].values()) - 1 > TOL]
+        return {c: st.fmean(table[n][c] / min(table[n].values()) for n in sens) for c in caps}, sens
+    a_soc, s_soc = agg(soc); a_wl, s_wl = agg(wl)
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 4.0))
+    for a, lab, col in ((a_soc, f"SoC-only (screen on anyway)\n{len(s_soc)} cap-sensitive jobs", BLUE), (a_wl, f"whole-laptop (+{rest:.1f} W × time)\n{len(s_wl)} all-core jobs", ORANGE)):
+        m = min(a.values()); a1.plot(caps, [a[c] / m for c in caps], "-o", color=col, lw=2, ms=5, label=lab)
+        flat = [c for c in caps if a[c] / m <= 1 + TOL]; a1.axvspan(flat[0], flat[-1], color=col, alpha=0.08)
+    a1.axhline(1 + TOL, color=GREY, ls="--", lw=1); a1.text(caps[-1], 1 + TOL + 0.005, "3 % band", ha="right", fontsize=8, color=GREY)
+    a1.axvline(6, color=GREEN, lw=1.5, ls=":"); a1.text(6.1, a1.get_ylim()[1] * 0.98 if False else 1.42, "6 W (installed)", color=GREEN, fontsize=8.5, va="top")
+    a1.set_xlabel("package cap PL1 = PL2 (W)"); a1.set_ylabel("energy per job / best (mean over jobs)"); a1.set_ylim(0.98, 1.45)
+    a1.set_title("Where the energy optimum sits, by accounting view"); a1.legend(fontsize=8, frameon=False, loc="upper right")
+    for n, lab, col in (("zstd_mt", "zstd, all-core", BLUE), ("sha_mt", "sha3 ×8", ORANGE), ("pdf_mt", "PDF ×8 parallel", GREEN), ("pdf_st", "PDF single-thread", GREY)):
+        t = {c: st.median([s for s, _ in D[n][c]]) for c in D[n]}; a2.plot(caps, [t[c] / t[12.0] for c in caps], "-o", color=col, lw=2, ms=4, label=lab)
+    a2.axvline(6, color=GREEN, lw=1.5, ls=":"); a2.set_xlabel("package cap PL1 = PL2 (W)"); a2.set_ylabel("time per job / time at 12 W")
+    a2.set_title("The price: how much longer a job takes"); a2.legend(fontsize=8, frameon=False)
+    save(fig, "fig6-inflection-retest")
+
+# ---------- Fig 7: profile comparison — paired differences with bootstrap CIs
+if os.path.exists(AB + ".tasks.tsv"):
+    import random
+    rnd = random.Random(1)
+    def per_round(cond, task, col):
+        return {int(r[0].split("#r")[1]): float(r[col]) for r in abt if r[0].split("#r")[0] == cond and r[1] == task and int(r[0].split("#r")[1]) in CLEAN}
+    def lat_round(cond): return {int(k.split("#r")[1]): st.median(v) for k, v in bursts.items() if k.split("#r")[0] == cond and int(k.split("#r")[1]) in CLEAN}
+    metrics = [("PDF render time", "pdf_render", 2), ("office time", "office", 2), ("python time", "python", 2), ("zstd time", "compress", 2), ("burst latency", None, None),
+               ("PDF render energy", "pdf_render", 5), ("office energy", "office", 5), ("python energy", "python", 5), ("zstd energy", "compress", 5), ("sustained power", "sustained20s", None)]
+    fig, ax = plt.subplots(figsize=(8.5, 4.6))
+    ys = list(range(len(metrics)))[::-1]
+    for ci, (cond, lab, col) in enumerate([("balanced", "stock Balanced − stock Power Saver", ORANGE), ("saver+bp", "tuned Power Saver − stock Power Saver", GREEN)]):
+        pts = []
+        for (name, task, colidx) in metrics:
+            if task is None: base, other = lat_round("saver"), lat_round(cond)
+            elif name == "sustained power":
+                b = per_round("saver", task, 5); bt = per_round("saver", task, 2); o = per_round(cond, task, 5); ot = per_round(cond, task, 2)
+                base = {r: b[r] / bt[r] for r in b}; other = {r: o[r] / ot[r] for r in o}
+            else: base, other = per_round("saver", task, colidx), per_round(cond, task, colidx)
+            d = [(other[r] - base[r]) / base[r] * 100 for r in sorted(base) if r in other]
+            meds = sorted(st.median(rnd.choices(d, k=len(d))) for _ in range(4000)); pts.append((st.median(d), meds[100], meds[3899]))
+        off = 0.18 if ci == 0 else -0.18
+        for y, (m, lo, hi) in zip(ys, pts):
+            ax.plot([lo, hi], [y + off, y + off], color=col, lw=2.2, alpha=0.9); ax.plot(m, y + off, "o", color=col, ms=6, label=lab if y == ys[0] else None)
+    ax.axvline(0, color="black", lw=1); ax.set_yticks(ys); ax.set_yticklabels([m[0] for m in metrics]); ax.set_xlabel("paired difference vs stock Power Saver (%), median of 4 rounds with 95 % bootstrap CI")
+    ax.axhspan(4.5, 9.6, color=BLUE, alpha=0.05); ax.text(-46, 9.3, "speed / latency  (negative = faster)", fontsize=8.5, color=BLUE)
+    ax.axhspan(-0.5, 4.5, color=RED, alpha=0.05); ax.text(-46, 4.2, "energy / power  (positive = costs more)", fontsize=8.5, color=RED)
+    ax.set_xlim(-50, 25); ax.set_title("What changing only the EPP does at a fixed 6 W cap"); ax.legend(fontsize=8.5, frameon=True, loc="upper right")
+    save(fig, "fig7-profile-paired-diffs")
