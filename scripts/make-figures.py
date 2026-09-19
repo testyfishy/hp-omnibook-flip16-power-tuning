@@ -111,10 +111,10 @@ GBMD = os.path.join(RES, "05-geekbench", "geekbench-20260919-0556.md")
 if os.path.exists(GBMD):
     rows = [l.split("|")[1:-1] for l in open(GBMD) if l.startswith("| ") and not l.startswith("| config")]
     rows = [[c.strip() for c in r] for r in rows]
-    names = {"battery6": "battery, 6 W cap\n(tuned Power Saver)", "ac": "plugged in\n(stock Balanced, 30/37 W)", "performance": "plugged in\n(Performance, 30/37 W)"}
+    names = {"battery6": "battery\n6 W cap\ntuned Power Saver", "ac": "plugged in\n30/37 W\nstock Balanced", "performance": "plugged in\n30/37 W\nPerformance"}
     labs = [names.get(r[0], r[0]) for r in rows]; single = [int(r[5]) for r in rows]; multi = [int(r[6]) for r in rows]
     wmean = [float(r[8]) for r in rows]; wh = [float(r[10]) for r in rows]
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.5, 3.9), gridspec_kw={"width_ratios": [1.25, 1]})
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 4.2), gridspec_kw={"width_ratios": [1.25, 1]})
     x = list(range(len(rows))); w = 0.38
     b1 = a1.bar([i - w / 2 for i in x], single, w, color=BLUE, label="single-core score"); b2 = a1.bar([i + w / 2 for i in x], multi, w, color=ORANGE, label="multi-core score")
     for b in list(b1) + list(b2): a1.text(b.get_x() + b.get_width() / 2, b.get_height() + 120, f"{int(b.get_height())}", ha="center", fontsize=8)
