@@ -26,20 +26,46 @@ Why 6 W and why balance_power:
   above it the V/f curve does.
 * **The cap barely touches daily use.** PDF rendering, an office conversion and a Python job took the *same*
   time at 4 W as at the stock limits; only all-core compression slows (6.2 s at 6 W vs 3.8 s at 12 W).
-* **EPP matters more than the cap.** With EPP `power` (what power-saver sets) single-thread work sat at 700–900
-  MHz. `balance_power` at the same 6 W cap made single-thread tasks **30–44 % faster** and interactive bursts
+* **The energy-performance preference (EPP) matters more than the cap.** Stock Power Saver sets EPP `power`,
+  which parks single-thread work at 700–900 MHz. Changing only the EPP to `balance_power` at the same 6 W cap
+  (the *tuned Power Saver* below) made single-thread tasks **30–44 % faster** and interactive bursts
   **13–16 % lower latency** for **+1.7 % SoC energy per task-set** and no change at idle (~0.50 W).
 * **PL1 = PL2 by design** ("no turbo"): the firmware's PL1 window is 28 s, PL2's is ~1 ms; equal limits make
   the cap effectively instantaneous, and the 6/8 tier showed no benefit from a separate burst budget.
 * Under an all-core load with the cap binding, the iGPU is held at its 400 MHz floor (driver throttle reason =
   PL1/PL2). CPU+GPU-heavy use (games) will crawl at 6 W; that is the point of the profile, not a bug.
 
+### The result in two figures
+
+![efficiency vs cap](results/figures/fig1-efficiency-vs-cap.png)
+
+![profiles at 6 W](results/figures/fig3-profiles-at-6w.png)
+
 Implementation: `scripts/power-switch.sh` + `scripts/power-switch.conf` (udev rule on the AC adapter, a boot
 service and a sleep hook re-apply it; installer `scripts/step13-power.sh`, EPP addition `scripts/step58-power-final.sh`).
 
 ## Methodology
 
-Measurement choices follow the energy-benchmarking literature (references at the end):
+### Names used throughout
+
+Three CPU configurations are compared. Each is a GNOME / power-profiles-daemon profile plus what that profile
+sets on this machine (the CPU energy-performance preference, EPP, and the HP thermal mode), with the package
+power cap held at 6 W for the comparison:
+
+| name in this write-up | profile selected | EPP the CPU runs with | HP thermal mode | in the raw files |
+|---|---|---|---|---|
+| **stock Power Saver** | power-saver | `power` | quiet | `saver` |
+| **stock Balanced** | balanced | `balance_performance` | balanced | `balanced` |
+| **tuned Power Saver** (the final battery profile) | power-saver | `balance_power` (overridden after the profile is set) | quiet | `saver+bp` |
+
+EPP is the one knob the profiles really differ by for the CPU: it tells the hardware how eagerly to raise
+clocks inside whatever power budget it has. `power` is the most reluctant, `performance` the most eager;
+`balance_power` sits one step above `power`. Caps are written as PL1/PL2 in watts (sustained / burst limit;
+this work uses equal values so there is no burst budget).
+
+### Measurement choices
+
+These follow the energy-benchmarking literature (references at the end):
 
 * **Energy source.** Intel RAPL package energy (`/sys/class/powercap/intel-rapl:0/energy_uj`) sampled at 2 Hz
   by a bash loop that forks nothing per sample (bash builtins + `read -t` as the timer). RAPL package energy
@@ -82,6 +108,8 @@ Screen on, battery, power-saver, hands off (`results/00-idle-baseline/`). SoC wa
 | + Firefox frozen | 1.02 | 3.4 | 2 200 | Firefox was rendering an animated tab continuously (−0.66 W) |
 | everything quiet | **0.51–0.55** | **59–60** | 700–950 | deep package idle is reachable with the screen on |
 
+![idle walk-down](results/figures/fig0-idle-walkdown.png)
+
 Overnight suspend (s2idle, 5.5 h): 0.62 W ≈ 0.95 % battery per hour.
 
 ### 1. Cap ladder, plugged in (balanced profile, EPP balance_performance)
@@ -111,7 +139,9 @@ entirely the all-core zstd task; below 7 W the energy curve turns back up. This 
 cool-down gate before each, 15 s idle + 4 tasks ×2 + 40 s sustained per tier. Fan never spun; package
 temperature 39–55 °C.
 
-![battery ladder](results/02-battery-ladder/ladder2-20260918-2258.png)
+![daily tasks vs cap](results/figures/fig2-daily-tasks-vs-cap.png)
+
+(Raw 2 Hz power trace of the whole ladder: `results/02-battery-ladder/ladder2-20260918-2258.png`.)
 
 Sustained 40 s all-core zstd (where PL1 vs PL2 shows):
 
@@ -159,23 +189,24 @@ Whole-tier view (battery drain from `energy_now`, "rest" = everything that is no
 Per-tier / per-phase mean, median, p10, p90, max power for every phase: `results/02-battery-ladder/ladder2-20260918-2258.summary.txt`.
 
 Reading: the **6 W equal cap is the inflection point** for sustained work (best J/GB), the short tasks are
-insensitive to the cap, and the one row that broke the pattern (8/8 with `balance_power`) said that the
-energy-performance preference, not the cap, was throttling single-thread work. That became experiment 3.
+insensitive to the cap, and the one row that broke the pattern (8/8 with EPP `balance_power`, the ★ in the
+figure) said that the EPP, not the cap, was throttling single-thread work. That became experiment 3.
 
 ### 3. Profile comparison at a fixed 6/6 W cap (interleaved A/B/C)
 
-`results/03-profile-ab/`. Conditions: **saver** = power-saver (EPP `power`, HP thermal mode quiet);
-**balanced** = balanced (EPP `balance_performance`, HP balanced); **saver+bp** = power-saver with EPP
-overridden to `balance_power`. Six rounds, six permutations, panel refresh frozen at 48 Hz.
+`results/03-profile-ab/`. The three configurations defined under *Names used throughout*, all at a 6/6 W cap:
+stock Power Saver, stock Balanced, tuned Power Saver. Six rounds, six permutations, panel refresh frozen at 48 Hz.
 
-Rounds 2 and 3 of the *saver* condition were contaminated (requested right after saver+bp, the daemon saw
-"no profile change" and left `balance_power` in place; visible as two fast outliers in `summary.txt`). The
-clean analysis below uses rounds 1, 4, 5, 6 (`summary-clean-rounds-1-4-5-6.txt`); the runner now sets EPP
-explicitly per condition.
+![profiles at 6 W](results/figures/fig3-profiles-at-6w.png)
+
+Rounds 2 and 3 of the *stock Power Saver* condition were contaminated (it was requested right after the tuned
+condition, the daemon saw "no profile change" and left `balance_power` in place; visible as two fast outliers
+in `summary.txt`). The clean analysis below uses rounds 1, 4, 5, 6 (`summary-clean-rounds-1-4-5-6.txt`); the
+runner now sets the EPP explicitly for every condition.
 
 Per-condition medians (clean rounds):
 
-| metric | saver | balanced | saver+bp |
+| metric | stock Power Saver | stock Balanced | tuned Power Saver |
 |---|---|---|---|
 | idle SoC W | 0.500 | 0.523 | 0.502 |
 | burst latency median / p95 (ms) | 134 / 141 | 116 / 119 | 116 / 118 |
@@ -189,9 +220,10 @@ Per-condition medians (clean rounds):
 | trial length s | 96.8 | 89.4 | 89.4 |
 | package Tmax °C | 44.5 | 48 | 48 |
 
-Paired differences vs saver (median of per-round differences, 95 % bootstrap CI, wins; * = CI excludes 0):
+Paired differences against stock Power Saver (median of the per-round differences, 95 % bootstrap CI, wins;
+* = CI excludes 0):
 
-| metric | balanced − saver | saver+bp − saver |
+| metric | stock Balanced − stock Power Saver | tuned Power Saver − stock Power Saver |
 |---|---|---|
 | burst latency median (ms) | −18.0 [−21.6, −11.6] 4/4 * | −18.9 [−20.7, −14.1] 4/4 * |
 | burst latency p95 (ms) | −22.6 [−23.0, −22.1] 4/4 * | −22.9 [−24.6, −22.7] 4/4 * |
@@ -206,14 +238,16 @@ Paired differences vs saver (median of per-round differences, 95 % bootstrap CI,
 | idle SoC W | n.s. | n.s. |
 
 Verdict: both alternatives buy a third less latency on everything interactive for a couple of percent of
-SoC energy under load and nothing at idle. `balance_power` gets the same speed as `balanced` for less energy
-and keeps the quiet fan mode, so it is the one applied.
+SoC energy under load and nothing at idle. The tuned Power Saver gets the same speed as stock Balanced for
+less energy and keeps the quiet fan mode, so it is the one applied.
 
 ### 4. Stress verification of the final policy
 
 `results/04-stress-verify/` (console log with per-phase readbacks, turbostat 10 s summaries, samples, chart).
 On battery with the final policy active: 20 s idle → 30 s single-thread → 90 s all-core `zstd -19` →
 all-core `openssl speed sha256` ×8 → the same plus the iGPU (glxgears, vsync off) → 30 s recovery.
+
+![stress trace](results/figures/fig4-stress-trace.png)
 
 | phase | SoC W mean / median / p99 / max | pkg T | note |
 |---|---|---|---|
@@ -247,6 +281,7 @@ sudo bash scripts/step59-stress-verify.sh                     # stress + PASS/FA
 sudo bash scripts/step60-geekbench.sh                         # Geekbench across battery/AC/performance (needs bench/Geekbench-6.7.1-Linux)
 python3 scripts/ladder-analyze.py results/02-battery-ladder/ladder2-20260918-2258     # re-analyse any run
 python3 scripts/ab-analyze.py results/03-profile-ab/ab-20260918-2356
+python3 scripts/make-figures.py                               # regenerate results/figures/ (needs matplotlib)
 ```
 
 Optional `PDF=/path/to/some.pdf` gives the render task a real document (the published runs used a 4.4 MB,
